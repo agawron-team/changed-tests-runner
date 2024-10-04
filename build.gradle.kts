@@ -3,7 +3,9 @@ import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
-    id("java") // Java support
+    //id("java") // Java support
+    //id("com.intellij.java")
+    //id("com.intellij.gradle")
     alias(libs.plugins.kotlin) // Kotlin support
     alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
@@ -37,6 +39,11 @@ dependencies {
     intellijPlatform {
         create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
 
+        bundledPlugins("com.intellij.gradle")
+        bundledPlugins("com.intellij.java")
+        bundledPlugin("JUnit")
+        bundledPlugin("Git4Idea")
+        //bundledPlugins("org.jetbrains.intellij")
         // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
         bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
 
