@@ -29,6 +29,7 @@ import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.task.ProjectTaskManager;
 import git4idea.commands.Git;
 import git4idea.commands.GitCommand;
 import git4idea.commands.GitLineHandler;
@@ -65,7 +66,9 @@ public class RunChangedTestsAction extends AnAction {
                 file.getFileType().getName().toLowerCase().equals("java")).toList();
 
         var runConfigurations = new LinkedList<RunnerAndConfigurationSettings>();
-        RunManager runManager = RunManager.getInstance(project);
+        var runManager = RunManagerEx.getInstanceEx(project);
+        var configs = runManager.getAllSettings();
+
         for (var virtualFile : changedTestFiles) {
             PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
             if (psiFile == null) {
@@ -77,7 +80,8 @@ public class RunChangedTestsAction extends AnAction {
             for (PsiClass javaFileClass : javaFileClasses) {
                 if (isJUnitClass(javaFileClass)) {
                     var configType = ConfigurationTypeUtil.findConfigurationType("JUnit");
-                    runConfigurations.add(getRunnerAndConfigurationSettings(javaFileClass, runManager, configType));
+                    var runConfig = getRunnerAndConfigurationSettings(javaFileClass, runManager, configType);
+                    runConfigurations.add(runConfig);
                 }
             }
         }
@@ -85,7 +89,7 @@ public class RunChangedTestsAction extends AnAction {
             return;
         }
 
-        var lastConfiguration = (RunnerAndConfigurationSettings) runConfigurations.pop();
+        /*var lastConfiguration = (RunnerAndConfigurationSettings) runConfigurations.pop();
         var beforeRunTasks = lastConfiguration.getConfiguration().getBeforeRunTasks();
         // RunProfileWithCompileBeforeLaunchOption
         // chain configurations to work around the IntelliJ limitation of showing just few configurations
@@ -96,13 +100,16 @@ public class RunChangedTestsAction extends AnAction {
             beforeTask.setEnabled(true);
             beforeRunTasks.add(beforeTask);
         }
-        lastConfiguration.getConfiguration().setBeforeRunTasks(beforeRunTasks);
+        lastConfiguration.getConfiguration().setBeforeRunTasks(beforeRunTasks);*/
 
-        ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
-                .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), lastConfiguration);
+        for (var runConfig : runConfigurations) {
+            ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
+                    .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
 
-        if (builder != null) {
-            ExecutionManager.getInstance(project).restartRunProfile(builder.build());
+            if (builder != null) {
+                //runManager.addConfiguration(lastConfiguration, false);
+                ExecutionManager.getInstance(project).restartRunProfile(builder.build());
+            }
         }
     }
 
@@ -130,6 +137,7 @@ public class RunChangedTestsAction extends AnAction {
         var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configType.getConfigurationFactories()[0]);
         var junitConfig = (JUnitConfiguration) runnerAndConfigurationSettings.getConfiguration();
         junitConfig.setMainClass(javaFileClass);
+        //junitConfig.setBeforeRunTasks(new ArrayList<>());
         return runnerAndConfigurationSettings;
     }
 
