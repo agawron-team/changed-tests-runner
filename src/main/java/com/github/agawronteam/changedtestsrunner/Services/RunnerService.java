@@ -32,14 +32,18 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
 
 @State(name = "RunnerService")
 @Service(Service.Level.PROJECT)
 public final class RunnerService implements PersistentStateComponent<RunnerService> {
 
     public boolean shouldSaveConfig = false;
+    private ResultsWindowFactory.TestResultsWindow testResultsWindow;
+    HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
 
     @Override
     public @Nullable RunnerService getState() {
@@ -51,7 +55,16 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         XmlSerializerUtil.copyBean(state, this);
     }
 
-    public void runRecentlyChangedTests(Project project, ResultsWindowFactory.TestResultsWindow resultsWindow) {
+    public boolean isRunningTests() {
+        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue);
+    }
+
+    public void runRecentlyChangedTests(Project project) {
+        if (isRunningTests()) {
+            return;
+        }
+        testJobsActive.clear();
+        testResultsWindow.reset();
         var changedFiles = getUncommittedChanges(project);
         var changedTestFiles = changedFiles.stream().filter(file ->
                 file.getFileType().getName().toLowerCase().equals("java")).toList();
@@ -79,10 +92,10 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
             ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
                     .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
 
-            if (resultsWindow != null) {
-                var junitConfig = (JUnitConfiguration) runConfig.getConfiguration();
-                resultsWindow.addTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName());
-            }
+            var junitConfig = (JUnitConfiguration) runConfig.getConfiguration();
+            var testId = getUUID(runConfig.getUniqueID());
+            testJobsActive.put(testId, true);
+            testResultsWindow.addTest(testId, junitConfig.getModules()[0].getName(), junitConfig.getActionName());
 
             if (builder != null) {
                 if (shouldSaveConfig) {
@@ -90,33 +103,30 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
                 }
 
                 ExecutionManager.getInstance(project).restartRunProfile(builder.build());
-
-                project.getMessageBus().connect().subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
-                    @Override
-                    public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
-                        var junitConfig = (JUnitConfiguration) env.getRunnerAndConfigurationSettings().getConfiguration();
-                        System.out.println("Process started " + executorId);
-                        if (resultsWindow != null) {
-                            resultsWindow.updateTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName(),
-                                    ResultsWindowFactory.TestStatus.RUNNING);
-                        }
-                        //check if started process is needed one
-                    }
-
-                    @Override
-                    public void processTerminated(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler, int exitCode) {
-                        System.out.println("Process " + executorId + " terminated with code " + exitCode);
-                        var junitConfig = (JUnitConfiguration) env.getRunnerAndConfigurationSettings().getConfiguration();
-                        //check if terminated process is needed one
-                        if (resultsWindow != null) {
-                            resultsWindow.updateTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName(),
-                                    exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
-                        }
-                    }
-                });
             }
         }
-        resultsWindow.expandAll();
+
+        project.getMessageBus().connect().subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
+            @Override
+            public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testResultsWindow.updateTest(testId,
+                        ResultsWindowFactory.TestStatus.RUNNING);
+            }
+
+            @Override
+            public void processTerminated(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler, int exitCode) {
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testJobsActive.put(testId, false);
+                testResultsWindow.updateTest(testId,
+                        exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+            }
+        });
+        testResultsWindow.expandAll();
+    }
+
+    UUID getUUID(String name) {
+        return UUID.nameUUIDFromBytes((name).getBytes());
     }
 
     private boolean isJUnitClass(PsiClass psiClass) {
@@ -138,5 +148,9 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
     public void triggerSaveConfig(ActionEvent e) {
         shouldSaveConfig = ((JCheckBox) e.getSource()).isSelected();
+    }
+
+    public void registerResultsWindow(ResultsWindowFactory.TestResultsWindow testResultsWindow) {
+        this.testResultsWindow = testResultsWindow;
     }
 }

@@ -18,6 +18,7 @@ import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
 import java.util.HashMap;
+import java.util.UUID;
 
 public class ResultsWindowFactory implements ToolWindowFactory {
 
@@ -39,7 +40,6 @@ public class ResultsWindowFactory implements ToolWindowFactory {
     }
 
     public ResultsWindowFactory() {
-        //thisLogger().warn("Don't forget to remove all non-needed sample code files with their corresponding registration entries in `plugin.xml`.")
     }
 
     @Override
@@ -54,6 +54,19 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         return true;
     }
 
+    class TestJob {
+        public UUID id;
+        public String module;
+        public String testClass;
+        public TestStatus status;
+        public TestJob(UUID id, String module, String testClass) {
+            this.id = id;
+            this.module = module;
+            this.testClass = testClass;
+            this.status = TestStatus.QUEUED;
+        }
+    }
+
     public class TestResultsWindow {
 
         private RunnerService service;
@@ -62,45 +75,27 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         private Tree treeResults;
         private JButton runChangedTestsButton;
         JBPanel<JBPanel<?>> panel;
-        HashMap<String, HashMap<String, DefaultMutableTreeNode>> modulesWithTests = new HashMap<>();
         HashMap<String, DefaultMutableTreeNode> moduleNodes = new HashMap<>();
+        HashMap<UUID, DefaultMutableTreeNode> testNodes = new HashMap<>();
+        HashMap<UUID, TestJob> testJobs = new HashMap<>();
 
         public TestResultsWindow(Project project) {
             this.project = project;
         }
 
-        boolean checkIfAllTestsFinished() {
-            for (var module : modulesWithTests.values()) {
-                for (var test : module.values()) {
-                    if (test.getUserObject().toString().startsWith(TestStatus.QUEUED.getText())
-                            || test.getUserObject().toString().startsWith(TestStatus.RUNNING.getText())) {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-
         public JBPanel<JBPanel<?>> getContent() {
             service = project.getService(RunnerService.class);
+            service.registerResultsWindow(this);
             panel = new JBPanel<>();
             panel.setLayout(new VerticalFlowLayout(true, false));
 
             runChangedTestsButton = new JButton("Run changed tests");
 
-            var thisIsIt = this;
             runChangedTestsButton.addActionListener(e -> {
                 var backgroundTask = new Task.Backgroundable(project, "Running recently changed tests...") {
                     @Override
                     public void run(@NotNull ProgressIndicator indicator) {
-                        panel.remove(treeResults);
-                        prepareTree(panel);
-                        modulesWithTests.clear();
-                        moduleNodes.clear();
-                        runChangedTestsButton.setEnabled(false);
-                        panel.validate();
-                        panel.repaint();
-                        ApplicationManager.getApplication().runReadAction(() -> service.runRecentlyChangedTests(project, thisIsIt));
+                        ApplicationManager.getApplication().runReadAction(() -> service.runRecentlyChangedTests(project));
                     }
                 };
                 backgroundTask.queue();
@@ -122,19 +117,18 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             panel.add(treeResults);
         }
 
-        public void addTest(String module, String testClass) {
+        public void addTest(UUID id, String module, String testClass) {
             if (!moduleNodes.containsKey(module)) {
                 var moduleNode = new DefaultMutableTreeNode(module);
                 moduleNodes.put(module, moduleNode);
                 root.add(moduleNode);
-                modulesWithTests.put(module, new HashMap<>());
             }
-            if (!modulesWithTests.get(module).containsKey(testClass)) {
+            if (!testNodes.containsKey(id)) {
                 var testNode = new DefaultMutableTreeNode("Queued " + testClass);
-                modulesWithTests.get(module).put(testClass, testNode);
+                testNodes.put(id, testNode);
                 moduleNodes.get(module).add(testNode);
+                testJobs.put(id, new TestJob(id, module, testClass));
             }
-
             panel.validate();
             panel.repaint();
         }
@@ -145,19 +139,26 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             }
         }
 
-        public void updateTest(String module, String testClass, TestStatus testStatus) {
-            if (!moduleNodes.containsKey(module)) {
-                System.out.println("Module " + module + " not found");
+        public void updateTest(UUID id, TestStatus testStatus) {
+            if (!testJobs.containsKey(id)) {
+                System.out.println("Test job " + id + " not found");
                 return;
             }
-            if (!modulesWithTests.get(module).containsKey(testClass)) {
-                System.out.println("Test " + testClass + " not found");
-                return;
-            }
-            modulesWithTests.get(module).get(testClass).setUserObject(testStatus.getText() + " " + testClass);
-            if (checkIfAllTestsFinished()) {
+            testNodes.get(id).setUserObject(testStatus.getText() + " " + testJobs.get(id).testClass);
+            if (!service.isRunningTests()) {
                 runChangedTestsButton.setEnabled(true);
             }
+            panel.validate();
+            panel.repaint();
+        }
+
+        public void reset() {
+            panel.remove(treeResults);
+            prepareTree(panel);
+            testNodes.clear();
+            moduleNodes.clear();
+            testJobs.clear();
+            runChangedTestsButton.setEnabled(false);
             panel.validate();
             panel.repaint();
         }
