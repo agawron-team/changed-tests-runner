@@ -2,17 +2,13 @@ package com.github.agawronteam.changedtestsrunner.ResultsWindow;
 
 
 import com.github.agawronteam.changedtestsrunner.Services.RunnerService;
-import com.intellij.diagnostic.hprof.util.TreeNode;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.MasterDetailsComponent;
 import com.intellij.openapi.ui.VerticalFlowLayout;
-import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
-import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.treeStructure.Tree;
@@ -21,13 +17,26 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
-import java.awt.*;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
 
 public class ResultsWindowFactory implements ToolWindowFactory {
+
+    public enum TestStatus {
+        QUEUED("Queued"),
+        RUNNING("Running"),
+        OK("OK"),
+        FAILED("Failed");
+
+        private String text;
+
+        TestStatus(String text) {
+            this.text = text;
+        }
+
+        public String getText() {
+            return this.text;
+        }
+    }
 
     public ResultsWindowFactory() {
         //thisLogger().warn("Don't forget to remove all non-needed sample code files with their corresponding registration entries in `plugin.xml`.")
@@ -45,47 +54,52 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         return true;
     }
 
-    public class TestResult {
-        public TestResult(String testClass, String module) {
-            this.testClass = testClass;
-            this.module = module;
-        }
-        public String module;
-        public String testClass;
-        public int exitCode;
-        public DefaultMutableTreeNode node;
-    }
-
-
     public class TestResultsWindow {
 
         private RunnerService service;
         private Project project;
+        private DefaultMutableTreeNode root;
+        private Tree treeResults;
+        private JButton runChangedTestsButton;
         JBPanel<JBPanel<?>> panel;
-        HashMap<String, HashMap<String, Integer>> testResults = new HashMap<>();
-        LinkedList<TestResult> treeNodes = new LinkedList<>();
+        HashMap<String, HashMap<String, DefaultMutableTreeNode>> modulesWithTests = new HashMap<>();
+        HashMap<String, DefaultMutableTreeNode> moduleNodes = new HashMap<>();
 
         public TestResultsWindow(Project project) {
             this.project = project;
         }
 
-        public JBPanel<JBPanel<?>> getContent() {
-            panel = new JBPanel<>();
-            panel.setLayout(new VerticalFlowLayout(true, false));
-            preparePanel(panel);
-            return panel;
+        boolean checkIfAllTestsFinished() {
+            for (var module : modulesWithTests.values()) {
+                for (var test : module.values()) {
+                    if (test.getUserObject().toString().startsWith(TestStatus.QUEUED.getText())
+                            || test.getUserObject().toString().startsWith(TestStatus.RUNNING.getText())) {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
 
-        private void preparePanel(JPanel panel) {
+        public JBPanel<JBPanel<?>> getContent() {
             service = project.getService(RunnerService.class);
+            panel = new JBPanel<>();
+            panel.setLayout(new VerticalFlowLayout(true, false));
 
-            JButton runChangedTestsButton = new JButton("Run changed tests");
+            runChangedTestsButton = new JButton("Run changed tests");
 
             var thisIsIt = this;
             runChangedTestsButton.addActionListener(e -> {
                 var backgroundTask = new Task.Backgroundable(project, "Running recently changed tests...") {
                     @Override
                     public void run(@NotNull ProgressIndicator indicator) {
+                        panel.remove(treeResults);
+                        prepareTree(panel);
+                        modulesWithTests.clear();
+                        moduleNodes.clear();
+                        runChangedTestsButton.setEnabled(false);
+                        panel.validate();
+                        panel.repaint();
                         ApplicationManager.getApplication().runReadAction(() -> service.runRecentlyChangedTests(project, thisIsIt));
                     }
                 };
@@ -98,58 +112,52 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             checkbox.addActionListener(e -> service.triggerSaveConfig(e));
             panel.add(checkbox);
 
-            var root = new DefaultMutableTreeNode("Test results");
-            treeNodes.clear();
-            for (var module : testResults.keySet()) {
-                var moduleNode = new DefaultMutableTreeNode(module);
+            prepareTree(panel);
+            return panel;
+        }
 
-                var result = new TestResult("empty", module);
-                result.node = moduleNode;
-                treeNodes.add(result);
-
-                root.add(moduleNode);
-                for (var testResult : testResults.get(module).entrySet()) {
-                    var testClass = testResult.getKey();
-                    var exitCode = testResult.getValue();
-                    DefaultMutableTreeNode leaf;
-                    if (exitCode == -1) {
-                        leaf = new DefaultMutableTreeNode("Running " + testClass);
-                    } else if (exitCode != 0) {
-                        leaf = new DefaultMutableTreeNode("Failed " + testClass);
-                    } else {
-                        leaf = new DefaultMutableTreeNode("OK " + testClass);
-                    }
-
-                    moduleNode.add(leaf);
-                }
-            }
-            var treeResults = new Tree(root);
-            for (var node : treeNodes) {
-                treeResults.expandPath(new TreePath(node.node.getPath()));
-            }
+        private void prepareTree(JPanel panel) {
+            root = new DefaultMutableTreeNode("Test results");
+            treeResults = new Tree(root);
             panel.add(treeResults);
         }
 
-        public void testStarted(String module, String testClass) {
-            //treeNodes.add(new TestResult(testClass, module));
-            if (!testResults.containsKey(module)) {
-                testResults.put(module, new HashMap<String, Integer>());
+        public void addTest(String module, String testClass) {
+            if (!moduleNodes.containsKey(module)) {
+                var moduleNode = new DefaultMutableTreeNode(module);
+                moduleNodes.put(module, moduleNode);
+                root.add(moduleNode);
+                modulesWithTests.put(module, new HashMap<>());
             }
-            testResults.get(module).put(testClass, Integer.valueOf(-1));
-            panel.removeAll();
-            preparePanel(panel);
+            if (!modulesWithTests.get(module).containsKey(testClass)) {
+                var testNode = new DefaultMutableTreeNode("Queued " + testClass);
+                modulesWithTests.get(module).put(testClass, testNode);
+                moduleNodes.get(module).add(testNode);
+            }
+
             panel.validate();
             panel.repaint();
         }
 
-        public void testFinished(String module, String testClass, int exitCode) {
-            if (!testResults.containsKey(module)) {
-                System.out.println("Module " + module + " not found in test results");
+        public void expandAll() {
+            for (var module : moduleNodes.values()) {
+                treeResults.expandPath(new TreePath(module.getPath()));
+            }
+        }
+
+        public void updateTest(String module, String testClass, TestStatus testStatus) {
+            if (!moduleNodes.containsKey(module)) {
+                System.out.println("Module " + module + " not found");
                 return;
             }
-            testResults.get(module).put(testClass, Integer.valueOf(exitCode));
-            panel.removeAll();
-            preparePanel(panel);
+            if (!modulesWithTests.get(module).containsKey(testClass)) {
+                System.out.println("Test " + testClass + " not found");
+                return;
+            }
+            modulesWithTests.get(module).get(testClass).setUserObject(testStatus.getText() + " " + testClass);
+            if (checkIfAllTestsFinished()) {
+                runChangedTestsButton.setEnabled(true);
+            }
             panel.validate();
             panel.repaint();
         }

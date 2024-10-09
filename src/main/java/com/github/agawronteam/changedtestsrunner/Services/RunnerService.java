@@ -79,6 +79,11 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
             ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
                     .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
 
+            if (resultsWindow != null) {
+                var junitConfig = (JUnitConfiguration) runConfig.getConfiguration();
+                resultsWindow.addTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName());
+            }
+
             if (builder != null) {
                 if (shouldSaveConfig) {
                     runManager.addConfiguration(runConfig, false);
@@ -92,7 +97,8 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
                         var junitConfig = (JUnitConfiguration) env.getRunnerAndConfigurationSettings().getConfiguration();
                         System.out.println("Process started " + executorId);
                         if (resultsWindow != null) {
-                            resultsWindow.testStarted(junitConfig.getModules()[0].getName(), junitConfig.getActionName());
+                            resultsWindow.updateTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName(),
+                                    ResultsWindowFactory.TestStatus.RUNNING);
                         }
                         //check if started process is needed one
                     }
@@ -102,11 +108,15 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
                         System.out.println("Process " + executorId + " terminated with code " + exitCode);
                         var junitConfig = (JUnitConfiguration) env.getRunnerAndConfigurationSettings().getConfiguration();
                         //check if terminated process is needed one
-                        resultsWindow.testFinished(junitConfig.getModules()[0].getName(), junitConfig.getActionName(), exitCode);
+                        if (resultsWindow != null) {
+                            resultsWindow.updateTest(junitConfig.getModules()[0].getName(), junitConfig.getActionName(),
+                                    exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+                        }
                     }
                 });
             }
         }
+        resultsWindow.expandAll();
     }
 
     private boolean isJUnitClass(PsiClass psiClass) {
