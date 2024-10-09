@@ -8,6 +8,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MasterDetailsComponent;
+import com.intellij.openapi.ui.VerticalFlowLayout;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
@@ -20,6 +21,7 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
+import java.awt.*;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -69,6 +71,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
 
         public JBPanel<JBPanel<?>> getContent() {
             panel = new JBPanel<>();
+            panel.setLayout(new VerticalFlowLayout(true, false));
             preparePanel(panel);
             return panel;
         }
@@ -97,9 +100,8 @@ public class ResultsWindowFactory implements ToolWindowFactory {
 
             var root = new DefaultMutableTreeNode("Test results");
             treeNodes.clear();
-            //var list = new JList<>(List.of("abc", "cde"));
             for (var module : testResults.keySet()) {
-                var moduleNode = new DefaultMutableTreeNode("module " + module);
+                var moduleNode = new DefaultMutableTreeNode(module);
 
                 var result = new TestResult("empty", module);
                 result.node = moduleNode;
@@ -129,6 +131,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         }
 
         public void testStarted(String module, String testClass) {
+            //treeNodes.add(new TestResult(testClass, module));
             if (!testResults.containsKey(module)) {
                 testResults.put(module, new HashMap<String, Integer>());
             }

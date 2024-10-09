@@ -37,7 +37,6 @@ public class RunChangedTestsAction extends AnAction {
 
     public RunChangedTestsAction() {
         super("Run changed tests");
-
     }
 
     @Override
