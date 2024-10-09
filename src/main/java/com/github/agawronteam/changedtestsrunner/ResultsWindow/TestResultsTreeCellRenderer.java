@@ -10,16 +10,18 @@ public class TestResultsTreeCellRenderer extends DefaultTreeCellRenderer {
     @Override
     public Component getTreeCellRendererComponent(JTree tree, Object value, boolean selected, boolean expanded, boolean leaf, int row, boolean hasFocus) {
         JComponent c = (JComponent) super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus);
-        if (leaf && row != 0) {
-            DefaultMutableTreeNode node = (DefaultMutableTreeNode) value;
-            var data = (String) node.getUserObject();
-            if(data.contains(ResultsWindowFactory.TestStatus.FAILED.getText())){
-                c.setForeground(Color.red);
-                c.setOpaque(true);
-            } else if (data.contains(ResultsWindowFactory.TestStatus.OK.getText())){
-                c.setForeground(Color.green);
-                c.setOpaque(true);
+        DefaultMutableTreeNode node = (DefaultMutableTreeNode) value;
+        if (node.getUserObject() instanceof ResultsWindowFactory.TestJob) {
+            var data = (ResultsWindowFactory.TestJob) node.getUserObject();
+            var newComponent = new JLabel(data.status.getText() + " " + data.testClass);
+            if(data.status.equals(ResultsWindowFactory.TestStatus.FAILED)){
+                newComponent.setForeground(Color.red);
+                newComponent.setOpaque(true);
+            } else if (data.status.equals(ResultsWindowFactory.TestStatus.OK)){
+                newComponent.setForeground(Color.green);
+                newComponent.setOpaque(true);
             }
+            return newComponent;
         }
         return c;
     }

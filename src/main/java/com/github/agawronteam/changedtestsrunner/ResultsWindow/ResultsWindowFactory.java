@@ -124,10 +124,12 @@ public class ResultsWindowFactory implements ToolWindowFactory {
                 public void mousePressed(MouseEvent e) {
                     int selRow = treeResults.getRowForLocation(e.getX(), e.getY());
                     TreePath selPath = treeResults.getPathForLocation(e.getX(), e.getY());
+
+                    DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) (selPath.getLastPathComponent());
+                    String selectedValue = (String) selectedNode.getUserObject();
                     if(selRow != -1) {
                         if(e.getClickCount() == 2) {
-
-                            System.out.println("Clicked row " + selRow);
+                            System.out.println("Clicked row " + selRow + " value: " + selectedValue);
                         }
                     }
                 }
@@ -144,10 +146,11 @@ public class ResultsWindowFactory implements ToolWindowFactory {
                 root.add(moduleNode);
             }
             if (!testNodes.containsKey(id)) {
-                var testNode = new DefaultMutableTreeNode("Queued " + testClass);
+                var testValue = new TestJob(id, module, testClass);
+                var testNode = new DefaultMutableTreeNode(testValue);
                 testNodes.put(id, testNode);
                 moduleNodes.get(module).add(testNode);
-                testJobs.put(id, new TestJob(id, module, testClass));
+                testJobs.put(id, testValue);
             }
             panel.validate();
             panel.repaint();
@@ -164,7 +167,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
                 System.out.println("Test job " + id + " not found");
                 return;
             }
-            testNodes.get(id).setUserObject(testStatus.getText() + " " + testJobs.get(id).testClass);
+            testJobs.get(id).status = testStatus;
             if (!service.isRunningTests()) {
                 runChangedTestsButton.setEnabled(true);
             }
