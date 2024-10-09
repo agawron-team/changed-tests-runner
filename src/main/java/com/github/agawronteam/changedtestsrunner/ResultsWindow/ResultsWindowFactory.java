@@ -23,6 +23,7 @@ import java.util.UUID;
 public class ResultsWindowFactory implements ToolWindowFactory {
 
     public enum TestStatus {
+        CHANGED("Changed"),
         QUEUED("Queued"),
         RUNNING("Running"),
         OK("OK"),
