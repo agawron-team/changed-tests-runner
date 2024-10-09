@@ -17,6 +17,9 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.util.HashMap;
 import java.util.UUID;
 
@@ -115,6 +118,22 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         private void prepareTree(JPanel panel) {
             root = new DefaultMutableTreeNode("Test results");
             treeResults = new Tree(root);
+            treeResults.setCellRenderer(new TestResultsTreeCellRenderer());
+
+            MouseListener ml = new MouseAdapter() {
+                public void mousePressed(MouseEvent e) {
+                    int selRow = treeResults.getRowForLocation(e.getX(), e.getY());
+                    TreePath selPath = treeResults.getPathForLocation(e.getX(), e.getY());
+                    if(selRow != -1) {
+                        if(e.getClickCount() == 2) {
+
+                            System.out.println("Clicked row " + selRow);
+                        }
+                    }
+                }
+            };
+            treeResults.addMouseListener(ml);
+
             panel.add(treeResults);
         }
 
