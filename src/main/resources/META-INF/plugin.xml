@@ -13,7 +13,7 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.agawronteam.changedtestsrunner.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.agawronteam.changedtestsrunner.ResultsWindow.ResultsWindowFactory" id="Test Results"/>
     </extensions>
 
     <applicationListeners>
@@ -25,7 +25,7 @@
                 id="com.github.agawronteam.changedtestsrunner.Actions.RunChangedTestsAction"
                 class="com.github.agawronteam.changedtestsrunner.Actions.RunChangedTestsAction"
                 text="Run Changed Tests"
-                description="Runs only changed tests">
+                description="Runs changed tests only">
             <add-to-group group-id="ToolsMenu" anchor="first"/>
         </action>
     </actions>
