@@ -42,6 +42,7 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
     public boolean shouldSaveConfig = false;
     private ResultsWindowFactory.TestResultsWindow testResultsWindow;
     HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
+    HashMap<Project, Boolean> subscribedProjects = new HashMap<>();
 
     @Override
     public @Nullable RunnerService getState() {
@@ -67,25 +68,42 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         var changedTestFiles = changedFiles.stream().filter(file ->
                 file.getFileType().getName().toLowerCase().equals("java")).toList();
 
-        var runConfigurations = new LinkedList<RunnerAndConfigurationSettings>();
         var runManager = RunManagerEx.getInstanceEx(project);
 
-        for (var virtualFile : changedTestFiles) {
-            PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
-            if (psiFile == null) {
-                continue;
-            }
-            PsiJavaFile psiJavaFile = (PsiJavaFile) psiFile;
-            PsiClass[] javaFileClasses = psiJavaFile.getClasses();
+        var runConfigurations = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
 
-            for (PsiClass javaFileClass : javaFileClasses) {
-                if (isJUnitClass(javaFileClass)) {
-                    var runConfig = getRunnerAndConfigurationSettings(javaFileClass, runManager, JUnitConfigurationType.getInstance());
-                    runConfigurations.add(runConfig);
-                }
-            }
+        executeConfigurations(project, runConfigurations, runManager);
+
+        subscribeToExecutionEvents(project);
+        testResultsWindow.expandAll();
+    }
+
+    private void subscribeToExecutionEvents(Project project) {
+        if (subscribedProjects.containsKey(project)) {
+            return;
         }
+        subscribedProjects.put(project, true);
+        project.getMessageBus().connect().subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
+            @Override
+            public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
+                System.out.println("Process started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testResultsWindow.updateTest(testId,
+                        ResultsWindowFactory.TestStatus.RUNNING);
+            }
 
+            @Override
+            public void processTerminated(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler, int exitCode) {
+                System.out.println("Process finished: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testJobsActive.put(testId, false);
+                testResultsWindow.updateTest(testId,
+                        exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+            }
+        });
+    }
+
+    private void executeConfigurations(Project project, List<RunnerAndConfigurationSettings> runConfigurations, RunManagerEx runManager) {
         for (var runConfig : runConfigurations) {
             ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
                     .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
@@ -103,24 +121,26 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
                 ExecutionManager.getInstance(project).restartRunProfile(builder.build());
             }
         }
+    }
 
-        project.getMessageBus().connect().subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
-            @Override
-            public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
-                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
-                testResultsWindow.updateTest(testId,
-                        ResultsWindowFactory.TestStatus.RUNNING);
+    private List<RunnerAndConfigurationSettings> getRunConfigurationsFromChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManagerEx runManager) {
+        var runConfigurations = new LinkedList<RunnerAndConfigurationSettings>();
+        for (var virtualFile : changedTestFiles) {
+            PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+            if (psiFile == null) {
+                continue;
             }
+            PsiJavaFile psiJavaFile = (PsiJavaFile) psiFile;
+            PsiClass[] javaFileClasses = psiJavaFile.getClasses();
 
-            @Override
-            public void processTerminated(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler, int exitCode) {
-                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
-                testJobsActive.put(testId, false);
-                testResultsWindow.updateTest(testId,
-                        exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+            for (PsiClass javaFileClass : javaFileClasses) {
+                if (isJUnitClass(javaFileClass)) {
+                    var runConfig = getRunnerAndConfigurationSettings(javaFileClass, runManager, JUnitConfigurationType.getInstance());
+                    runConfigurations.add(runConfig);
+                }
             }
-        });
-        testResultsWindow.expandAll();
+        }
+        return runConfigurations;
     }
 
     UUID getUUID(String name) {
