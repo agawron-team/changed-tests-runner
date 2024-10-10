@@ -1,11 +1,11 @@
 package com.github.agawronteam.changedtestsrunner.Services;
 
 import com.github.agawronteam.changedtestsrunner.ResultsWindow.ResultsWindowFactory;
+import com.github.agawronteam.changedtestsrunner.TestJobConfig;
 import com.intellij.execution.ExecutionListener;
 import com.intellij.execution.ExecutionManager;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunManagerEx;
-import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.junit.JUnitConfiguration;
@@ -70,9 +70,9 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
         var runManager = RunManagerEx.getInstanceEx(project);
 
-        var runConfigurations = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
+        var testJobConfigs = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
 
-        executeConfigurations(project, runConfigurations, runManager);
+        executeConfigurations(project, testJobConfigs, runManager);
 
         subscribeToExecutionEvents(project);
         testResultsWindow.expandAll();
@@ -103,15 +103,15 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         });
     }
 
-    private void executeConfigurations(Project project, List<RunnerAndConfigurationSettings> runConfigurations, RunManagerEx runManager) {
-        for (var runConfig : runConfigurations) {
+    private void executeConfigurations(Project project, List<TestJobConfig> testJobConfigs, RunManagerEx runManager) {
+        for (var testJobConfig : testJobConfigs) {
+            var runConfig = testJobConfig.runConfig;
             ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
                     .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
 
-            var junitConfig = (JUnitConfiguration) runConfig.getConfiguration();
             var testId = getUUID(runConfig.getUniqueID());
             testJobsActive.put(testId, true);
-            testResultsWindow.addTest(testId, junitConfig.getModules()[0].getName(), junitConfig.getActionName());
+            testResultsWindow.addTest(testId, testJobConfig);
 
             if (builder != null) {
                 if (shouldSaveConfig) {
@@ -123,8 +123,8 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         }
     }
 
-    private List<RunnerAndConfigurationSettings> getRunConfigurationsFromChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManagerEx runManager) {
-        var runConfigurations = new LinkedList<RunnerAndConfigurationSettings>();
+    private List<TestJobConfig> getRunConfigurationsFromChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManagerEx runManager) {
+        var testJobConfigs = new LinkedList<TestJobConfig>();
         for (var virtualFile : changedTestFiles) {
             PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
             if (psiFile == null) {
@@ -135,15 +135,15 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
             for (PsiClass javaFileClass : javaFileClasses) {
                 if (isJUnitClass(javaFileClass)) {
-                    var runConfig = getRunnerAndConfigurationSettings(javaFileClass, runManager, JUnitConfigurationType.getInstance());
-                    runConfigurations.add(runConfig);
+                    var testJobConfig = getTestJobConfigs(javaFileClass, runManager, JUnitConfigurationType.getInstance(), virtualFile);
+                    testJobConfigs.add(testJobConfig);
                 }
             }
         }
-        return runConfigurations;
+        return testJobConfigs;
     }
 
-    UUID getUUID(String name) {
+    static UUID getUUID(String name) {
         return UUID.nameUUIDFromBytes((name).getBytes());
     }
 
@@ -157,11 +157,11 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         return changeListManager.getAffectedFiles();
     }
 
-    private static @NotNull RunnerAndConfigurationSettings getRunnerAndConfigurationSettings(PsiClass javaFileClass, RunManager runManager, ConfigurationType configType) {
+    private static @NotNull TestJobConfig getTestJobConfigs(PsiClass javaFileClass, RunManager runManager, ConfigurationType configType, VirtualFile virtualFile) {
         var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configType.getConfigurationFactories()[0]);
         var junitConfig = (JUnitConfiguration) runnerAndConfigurationSettings.getConfiguration();
         junitConfig.setMainClass(javaFileClass);
-        return runnerAndConfigurationSettings;
+        return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), junitConfig.getModules()[0].getName(), junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
     }
 
     public void triggerSaveConfig(ActionEvent e) {

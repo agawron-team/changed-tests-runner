@@ -2,11 +2,16 @@ package com.github.agawronteam.changedtestsrunner.ResultsWindow;
 
 
 import com.github.agawronteam.changedtestsrunner.Services.RunnerService;
+import com.github.agawronteam.changedtestsrunner.TestJobConfig;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.VerticalFlowLayout;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.ui.components.JBPanel;
@@ -58,19 +63,6 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         return true;
     }
 
-    class TestJob {
-        public UUID id;
-        public String module;
-        public String testClass;
-        public TestStatus status;
-        public TestJob(UUID id, String module, String testClass) {
-            this.id = id;
-            this.module = module;
-            this.testClass = testClass;
-            this.status = TestStatus.QUEUED;
-        }
-    }
-
     public class TestResultsWindow {
 
         private RunnerService service;
@@ -81,7 +73,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         JBPanel<JBPanel<?>> panel;
         HashMap<String, DefaultMutableTreeNode> moduleNodes = new HashMap<>();
         HashMap<UUID, DefaultMutableTreeNode> testNodes = new HashMap<>();
-        HashMap<UUID, TestJob> testJobs = new HashMap<>();
+        HashMap<UUID, TestJobConfig> testJobs = new HashMap<>();
 
         public TestResultsWindow(Project project) {
             this.project = project;
@@ -125,11 +117,22 @@ public class ResultsWindowFactory implements ToolWindowFactory {
                     int selRow = treeResults.getRowForLocation(e.getX(), e.getY());
                     TreePath selPath = treeResults.getPathForLocation(e.getX(), e.getY());
 
+                    if (selPath == null) {
+                        return;
+                    }
                     DefaultMutableTreeNode selectedNode = (DefaultMutableTreeNode) (selPath.getLastPathComponent());
-                    String selectedValue = (String) selectedNode.getUserObject();
-                    if(selRow != -1) {
+
+                    if(selRow > 0 && selectedNode.isLeaf()) {
+                        var selectedValue = (TestJobConfig) selectedNode.getUserObject();
                         if(e.getClickCount() == 2) {
-                            System.out.println("Clicked row " + selRow + " value: " + selectedValue);
+                            System.out.println("Clicked row " + selRow + " value: " + selectedValue.testClass);
+                            FileEditorManager.getInstance(project).openTextEditor(
+                                    new OpenFileDescriptor(
+                                            project,
+                                            selectedValue.virtualFile
+                                    ),
+                                    true // request focus to editor
+                            );
                         }
                     }
                 }
@@ -139,18 +142,17 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             panel.add(treeResults);
         }
 
-        public void addTest(UUID id, String module, String testClass) {
-            if (!moduleNodes.containsKey(module)) {
-                var moduleNode = new DefaultMutableTreeNode(module);
-                moduleNodes.put(module, moduleNode);
+        public void addTest(UUID id, TestJobConfig testJobConfig) {
+            if (!moduleNodes.containsKey(testJobConfig.module)) {
+                var moduleNode = new DefaultMutableTreeNode(testJobConfig.module);
+                moduleNodes.put(testJobConfig.module, moduleNode);
                 root.add(moduleNode);
             }
             if (!testNodes.containsKey(id)) {
-                var testValue = new TestJob(id, module, testClass);
-                var testNode = new DefaultMutableTreeNode(testValue);
+                var testNode = new DefaultMutableTreeNode(testJobConfig);
                 testNodes.put(id, testNode);
-                moduleNodes.get(module).add(testNode);
-                testJobs.put(id, testValue);
+                moduleNodes.get(testJobConfig.module).add(testNode);
+                testJobs.put(id, testJobConfig);
             }
             panel.validate();
             panel.repaint();
