@@ -9,6 +9,5 @@ public class RunnerServiceTest {
     @Test
     public void myTest() {
         assertThat(1).isEqualTo(1);
-
     }
 }

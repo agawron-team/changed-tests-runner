@@ -2,7 +2,7 @@
 
 # changed-tests-runner Changelog
 
-## [0.0.1]
+## [Unreleased]
 ### Initial release
 - Running JUnit >=4 tests based on uncommitted changes from your VCS.
 - Displaying results in a dedicated tool window.
