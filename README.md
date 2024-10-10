@@ -17,11 +17,11 @@
 - [ ] Click the <kbd>Watch</kbd> button on the top of the [IntelliJ Platform Plugin Template][template] to be notified about releases containing new features and fixes.
 
 <!-- Plugin description -->
-This Fancy IntelliJ Platform Plugin is going to be your implementation of the brilliant ideas that you have.
+This Fancy IntelliJ Platform Plugin will run recently changed JUnit >=4 tests based on uncommitted changes from your VCS.
 
-This specific section is a source for the [plugin.xml](/src/main/resources/META-INF/plugin.xml) file which will be extracted by the [Gradle](/build.gradle.kts) during the build process.
+The development of the pluging was a part of Innovation Sprint in Atlassian Data Center team in Sydney.
 
-To keep everything working, do not remove `<!-- ... -->` sections. 
+Author: Andrew Gawron (GitHub: https://github.com/agawron-team/)
 <!-- Plugin description end -->
 
 ## Installation

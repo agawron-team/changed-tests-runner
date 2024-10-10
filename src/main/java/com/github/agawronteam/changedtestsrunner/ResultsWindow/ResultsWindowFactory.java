@@ -110,12 +110,12 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             checkbox.addActionListener(e -> service.triggerSaveConfig(e));
             panel.add(checkbox);
 
-            prepareTree(panel);
+            prepareTree(panel, "Test results");
             return scroller;
         }
 
-        private void prepareTree(JPanel panel) {
-            root = new DefaultMutableTreeNode("Test results");
+        private void prepareTree(JPanel panel, String message) {
+            root = new DefaultMutableTreeNode(message);
             treeResults = new Tree(root);
             treeResults.setCellRenderer(new TestResultsTreeCellRenderer());
 
@@ -191,13 +191,12 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             }
         }
 
-        public void reset() {
+        public void reset(String message) {
             panel.remove(treeResults);
-            prepareTree(panel);
+            prepareTree(panel, message);
             testNodes.clear();
             moduleNodes.clear();
             testJobs.clear();
-            disableIfRunning();
             panel.validate();
             panel.repaint();
         }

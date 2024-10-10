@@ -74,10 +74,12 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         var testJobConfigs = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
 
         if (testJobConfigs.isEmpty()) {
+            isPreparingExecution = false;
+            testResultsWindow.reset("No tests to run");
             return;
         }
         // Clear the results window only if there are tests to run
-        testResultsWindow.reset();
+        testResultsWindow.reset("Tests results");
 
         executeConfigurations(project, testJobConfigs, runManager);
 
