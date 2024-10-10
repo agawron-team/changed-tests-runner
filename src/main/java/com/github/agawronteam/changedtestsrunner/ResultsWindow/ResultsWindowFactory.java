@@ -15,7 +15,9 @@ import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.treeStructure.Tree;
+import kotlin.coroutines.Continuation;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -44,6 +46,12 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         public String getText() {
             return this.text;
         }
+    }
+
+    @Override
+    public @Nullable Object isApplicableAsync(@NotNull Project project, @NotNull Continuation<? super Boolean> $completion) {
+        // TODO: check if the project is a Java project and contains junit files
+        return ToolWindowFactory.super.isApplicableAsync(project, $completion);
     }
 
     public ResultsWindowFactory() {
@@ -77,11 +85,12 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             this.project = project;
         }
 
-        public JBPanel<JBPanel<?>> getContent() {
+        public JScrollPane getContent() {
             service = project.getService(RunnerService.class);
             service.registerResultsWindow(this);
             panel = new JBPanel<>();
             panel.setLayout(new VerticalFlowLayout(true, false));
+            JScrollPane scroller = new JScrollPane(panel);
 
             runChangedTestsButton = new JButton("Run changed tests");
 
@@ -102,7 +111,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             panel.add(checkbox);
 
             prepareTree(panel);
-            return panel;
+            return scroller;
         }
 
         private void prepareTree(JPanel panel) {

@@ -10,6 +10,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.wm.ToolWindowManager;
 import org.jetbrains.annotations.NotNull;
 
 public class RunChangedTestsAction extends AnAction {
@@ -37,6 +38,8 @@ public class RunChangedTestsAction extends AnAction {
     public void actionPerformed(@NotNull AnActionEvent event) {
         Project project = event.getProject();
         var service = project.getService(RunnerService.class);
+        ToolWindowManager.getInstance(project).getToolWindow("Test Results").show(() -> {
+        });
 
         var backgroundTask = new Task.Backgroundable(project, "Running recently changed tests...") {
             @Override
