@@ -3,7 +3,6 @@ package com.github.agawronteam.changedtestsrunner.ResultsWindow;
 
 import com.github.agawronteam.changedtestsrunner.Services.RunnerService;
 import com.github.agawronteam.changedtestsrunner.TestJobConfig;
-import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
@@ -11,7 +10,6 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.VerticalFlowLayout;
-import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.ui.components.JBPanel;
@@ -165,14 +163,17 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         }
 
         public void updateTest(UUID id, TestStatus testStatus) {
+            if (!service.isRunningTests()) {
+                runChangedTestsButton.setEnabled(true);
+            } else {
+                runChangedTestsButton.setEnabled(false);
+            }
             if (!testJobs.containsKey(id)) {
                 System.out.println("Test job " + id + " not found");
                 return;
             }
             testJobs.get(id).status = testStatus;
-            if (!service.isRunningTests()) {
-                runChangedTestsButton.setEnabled(true);
-            }
+
             panel.validate();
             panel.repaint();
         }
@@ -182,8 +183,8 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             prepareTree(panel);
             testNodes.clear();
             moduleNodes.clear();
-            testJobs.clear();
             runChangedTestsButton.setEnabled(false);
+            testJobs.clear();
             panel.validate();
             panel.repaint();
         }

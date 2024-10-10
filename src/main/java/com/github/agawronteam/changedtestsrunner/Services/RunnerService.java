@@ -93,6 +93,7 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
             public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
                 System.out.println("Process started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.RUNNING);
             }
