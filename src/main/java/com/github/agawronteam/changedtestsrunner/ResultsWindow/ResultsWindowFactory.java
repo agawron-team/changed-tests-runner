@@ -172,11 +172,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         }
 
         public void updateTest(UUID id, TestStatus testStatus) {
-            if (!service.isRunningTests()) {
-                runChangedTestsButton.setEnabled(true);
-            } else {
-                runChangedTestsButton.setEnabled(false);
-            }
+            disableIfRunning();
             if (!testJobs.containsKey(id)) {
                 System.out.println("Test job " + id + " not found");
                 return;
@@ -187,13 +183,21 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             panel.repaint();
         }
 
+        public void disableIfRunning() {
+            if (!service.isRunningTests()) {
+                runChangedTestsButton.setEnabled(true);
+            } else {
+                runChangedTestsButton.setEnabled(false);
+            }
+        }
+
         public void reset() {
             panel.remove(treeResults);
             prepareTree(panel);
             testNodes.clear();
             moduleNodes.clear();
-            runChangedTestsButton.setEnabled(false);
             testJobs.clear();
+            disableIfRunning();
             panel.validate();
             panel.repaint();
         }

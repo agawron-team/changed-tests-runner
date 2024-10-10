@@ -43,6 +43,7 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
     private ResultsWindowFactory.TestResultsWindow testResultsWindow;
     HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
     HashMap<Project, Boolean> subscribedProjects = new HashMap<>();
+    boolean isPreparingExecution = false;
 
     @Override
     public @Nullable RunnerService getState() {
@@ -55,13 +56,14 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
     }
 
     public boolean isRunningTests() {
-        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue);
+        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue) || isPreparingExecution;
     }
 
     public void runRecentlyChangedTests(Project project) {
         if (isRunningTests()) {
             return;
         }
+        isPreparingExecution = true;
         testJobsActive.clear();
         var changedFiles = getUncommittedChanges(project);
         var changedTestFiles = changedFiles.stream().filter(file ->
@@ -81,6 +83,7 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
         subscribeToExecutionEvents(project);
         testResultsWindow.expandAll();
+        isPreparingExecution = false;
     }
 
     private void subscribeToExecutionEvents(Project project) {
@@ -90,12 +93,30 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         subscribedProjects.put(project, true);
         project.getMessageBus().connect().subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
             @Override
+            public void processStartScheduled(@NotNull String executorId, @NotNull ExecutionEnvironment env) {
+                System.out.println("Process start scheduled: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testJobsActive.put(testId, true);
+                testResultsWindow.updateTest(testId,
+                        ResultsWindowFactory.TestStatus.QUEUED);
+            }
+
+            @Override
             public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
                 System.out.println("Process started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
                 testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.RUNNING);
+            }
+
+            @Override
+            public void processNotStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env) {
+                System.out.println("Process not started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
+                var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                testJobsActive.put(testId, false);
+                testResultsWindow.updateTest(testId,
+                        ResultsWindowFactory.TestStatus.FAILED);
             }
 
             @Override
