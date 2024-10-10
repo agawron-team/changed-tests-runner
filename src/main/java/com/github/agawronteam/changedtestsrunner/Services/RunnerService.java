@@ -63,7 +63,6 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
             return;
         }
         testJobsActive.clear();
-        testResultsWindow.reset();
         var changedFiles = getUncommittedChanges(project);
         var changedTestFiles = changedFiles.stream().filter(file ->
                 file.getFileType().getName().toLowerCase().equals("java")).toList();
@@ -71,6 +70,12 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         var runManager = RunManagerEx.getInstanceEx(project);
 
         var testJobConfigs = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
+
+        if (testJobConfigs.isEmpty()) {
+            return;
+        }
+        // Clear the results window only if there are tests to run
+        testResultsWindow.reset();
 
         executeConfigurations(project, testJobConfigs, runManager);
 
