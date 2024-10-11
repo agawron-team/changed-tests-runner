@@ -9,4 +9,4 @@
 - Linking executed test suites to the source code.
 - Saving run configurations in the project settings.
 - Persisting plugin settings in the IDE settings.
-- Available from dedicated tool window or Tools menu.
+- Action is available from a dedicated tool window or Tools menu.

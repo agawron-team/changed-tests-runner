@@ -4,7 +4,9 @@ import com.github.agawronteam.changedtestsrunner.ResultsWindow.ResultsWindowFact
 import com.github.agawronteam.changedtestsrunner.TestJobConfig;
 import com.intellij.execution.ExecutionListener;
 import com.intellij.execution.ExecutionManager;
+import com.intellij.execution.Executor;
 import com.intellij.execution.RunManager;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.junit.JUnitConfiguration;
@@ -45,6 +47,19 @@ public class RunnerServiceImpl {
 
     public boolean isRunningTests() {
         return testJobsActive.values().stream().anyMatch(Boolean::booleanValue) || isPreparingExecution;
+    }
+
+    public PsiManager getPsiManagerInstance(Project project) {
+        return PsiManager.getInstance(project);
+    }
+
+    public JUnitConfigurationType getJUnitConfigurationTypeInstance() {
+        return JUnitConfigurationType.getInstance();
+    }
+
+    public ExecutionEnvironmentBuilder getExecutionEnvironmentBuilder(RunnerAndConfigurationSettings runnerAndConfigurationSettings) {
+        return ExecutionEnvironmentBuilder
+                .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runnerAndConfigurationSettings);
     }
 
     public void runRecentlyChangedTests(Project project) {
@@ -135,8 +150,7 @@ public class RunnerServiceImpl {
     private void executeConfigurations(Project project, List<TestJobConfig> testJobConfigs, RunManager runManager) {
         for (var testJobConfig : testJobConfigs) {
             var runConfig = testJobConfig.runConfig;
-            ExecutionEnvironmentBuilder builder = ExecutionEnvironmentBuilder
-                    .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runConfig);
+            ExecutionEnvironmentBuilder builder = getExecutionEnvironmentBuilder(runConfig);
 
             var testId = getUUID(runConfig.getUniqueID());
             testJobsActive.put(testId, true);
@@ -155,7 +169,7 @@ public class RunnerServiceImpl {
     private List<TestJobConfig> getRunConfigurationsFromChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManager runManager) {
         var testJobConfigs = new LinkedList<TestJobConfig>();
         for (var virtualFile : changedTestFiles) {
-            PsiFile psiFile = PsiManager.getInstance(project).findFile(virtualFile);
+            PsiFile psiFile = getPsiManagerInstance(project).findFile(virtualFile);
             if (psiFile == null) {
                 continue;
             }
@@ -164,7 +178,7 @@ public class RunnerServiceImpl {
 
             for (PsiClass javaFileClass : javaFileClasses) {
                 if (isJUnitClass(javaFileClass)) {
-                    var testJobConfig = getTestJobConfigs(javaFileClass, runManager, JUnitConfigurationType.getInstance(), virtualFile);
+                    var testJobConfig = getTestJobConfigs(javaFileClass, runManager, getJUnitConfigurationTypeInstance(), virtualFile);
                     testJobConfigs.add(testJobConfig);
                 }
             }
@@ -187,7 +201,8 @@ public class RunnerServiceImpl {
     }
 
     private static @NotNull TestJobConfig getTestJobConfigs(PsiClass javaFileClass, RunManager runManager, ConfigurationType configType, VirtualFile virtualFile) {
-        var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configType.getConfigurationFactories()[0]);
+        var configFactory = configType.getConfigurationFactories()[0];
+        var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configFactory);
         var junitConfig = (JUnitConfiguration) runnerAndConfigurationSettings.getConfiguration();
         junitConfig.setMainClass(javaFileClass);
         return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), junitConfig.getModules()[0].getName(), junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
