@@ -3,7 +3,10 @@ import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
-    id("java") // Java support
+    //id("java") // Java support
+    //id("com.intellij.java")
+    //id("com.intellij.gradle")
+    id("net.bytebuddy.byte-buddy-gradle-plugin") version "1.15.4"
     alias(libs.plugins.kotlin) // Kotlin support
     alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
@@ -29,14 +32,22 @@ repositories {
     }
 }
 
+val mockitoAgent = configurations.create("mockitoAgent")
 // Dependencies are managed with Gradle version catalog - read more: https://docs.gradle.org/current/userguide/platforms.html#sub:version-catalog
 dependencies {
     testImplementation(libs.junit)
+    testImplementation(libs.mockito)
+    mockitoAgent(libs.mockito) { isTransitive = false }
 
     // IntelliJ Platform Gradle Plugin Dependencies Extension - read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-dependencies-extension.html
     intellijPlatform {
         create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
 
+        bundledPlugins("com.intellij.gradle")
+        bundledPlugins("com.intellij.java")
+        bundledPlugin("JUnit")
+        bundledPlugin("Git4Idea")
+        //bundledPlugins("org.jetbrains.intellij")
         // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
         bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
 

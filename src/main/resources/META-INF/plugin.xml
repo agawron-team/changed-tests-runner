@@ -5,14 +5,28 @@
     <vendor>agawron-team</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>com.intellij.java</depends>
+    <!--depends>org.jetbrains.plugins.gradle</depends-->
+    <depends>JUnit</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.agawronteam.changedtestsrunner.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.agawronteam.changedtestsrunner.ResultsWindow.ResultsWindowFactory" id="Test Results"/>
     </extensions>
 
     <applicationListeners>
         <listener class="com.github.agawronteam.changedtestsrunner.listeners.MyApplicationActivationListener" topic="com.intellij.openapi.application.ApplicationActivationListener"/>
     </applicationListeners>
+
+    <actions>
+        <action
+                id="com.github.agawronteam.changedtestsrunner.Actions.RunChangedTestsAction"
+                class="com.github.agawronteam.changedtestsrunner.Actions.RunChangedTestsAction"
+                text="Run Changed Tests"
+                description="Runs changed tests only">
+            <add-to-group group-id="ToolsMenu" anchor="first"/>
+        </action>
+    </actions>
 </idea-plugin>
