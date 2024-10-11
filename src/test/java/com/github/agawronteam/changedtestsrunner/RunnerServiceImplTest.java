@@ -42,11 +42,11 @@ public class RunnerServiceImplTest {
 
     RunnerServiceImpl runnerService = new RunnerServiceImplTestable();
 
-    /*@Test
+    @Test
     public void shouldUpdateResultWindowWithNoTestsIfNoChangedFiles() {
         runnerService.registerResultsWindow(testResultsWindow);
         runnerService.runRecentlyChangedTests(project);
 
         verify(testResultsWindow, times(1)).reset("No tests to run");
-    }*/
+    }
 }

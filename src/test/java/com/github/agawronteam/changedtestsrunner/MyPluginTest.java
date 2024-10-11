@@ -28,11 +28,11 @@ public class MyPluginTest extends BasePlatformTestCase {
         myFixture.testRename("foo.xml", "foo_after.xml", "a2");
     }*/
 
-    public void testProjectService() {
+    /*public void testProjectService() {
         var projectService = getProject().getService(RunnerService.class);
 
         projectService.runRecentlyChangedTests(getProject());
-    }
+    }*/
 
     @Override
     protected String getTestDataPath() {
