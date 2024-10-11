@@ -1,5 +1,6 @@
 package com.github.agawronteam.changedtestsrunner;
 
+import com.github.agawronteam.changedtestsrunner.Services.RunnerService;
 import com.intellij.ide.highlighter.XmlFileType;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.testFramework.TestDataPath;
@@ -25,13 +26,13 @@ public class MyPluginTest extends BasePlatformTestCase {
 
     /*public void testRename() {
         myFixture.testRename("foo.xml", "foo_after.xml", "a2");
-    }
+    }*/
 
     public void testProjectService() {
-        var projectService = getProject().getService(MyProjectService.class);
+        var projectService = getProject().getService(RunnerService.class);
 
-        assertNotSame(projectService.getRandomNumber(), projectService.getRandomNumber());
-    }*/
+        projectService.runRecentlyChangedTests(getProject());
+    }
 
     @Override
     protected String getTestDataPath() {

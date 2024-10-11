@@ -106,7 +106,7 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             panel.add(runChangedTestsButton);
 
             var checkbox = new JCheckBox("Save run configurations");
-            checkbox.setSelected(service.shouldSaveConfig);
+            checkbox.setSelected(service.isShouldSaveConfig());
             checkbox.addActionListener(e -> service.triggerSaveConfig(e));
             panel.add(checkbox);
 
