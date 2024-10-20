@@ -4,7 +4,6 @@ import com.github.agawronteam.changedtestsrunner.ResultsWindow.ResultsWindowFact
 import com.github.agawronteam.changedtestsrunner.TestJobConfig;
 import com.intellij.execution.ExecutionListener;
 import com.intellij.execution.ExecutionManager;
-import com.intellij.execution.Executor;
 import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ConfigurationType;
@@ -113,6 +112,9 @@ public class RunnerServiceImpl {
             public void processStartScheduled(@NotNull String executorId, @NotNull ExecutionEnvironment env) {
                 System.out.println("Process start scheduled: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                if (!testJobsActive.containsKey(testId)) {
+                    return;
+                }
                 testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.QUEUED);
@@ -122,6 +124,9 @@ public class RunnerServiceImpl {
             public void processStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler) {
                 System.out.println("Process started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                if (!testJobsActive.containsKey(testId)) {
+                    return;
+                }
                 testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.RUNNING);
@@ -131,6 +136,9 @@ public class RunnerServiceImpl {
             public void processNotStarted(@NotNull String executorId, @NotNull ExecutionEnvironment env) {
                 System.out.println("Process not started: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                if (!testJobsActive.containsKey(testId)) {
+                    return;
+                }
                 testJobsActive.put(testId, false);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.FAILED);
@@ -140,6 +148,9 @@ public class RunnerServiceImpl {
             public void processTerminated(@NotNull String executorId, @NotNull ExecutionEnvironment env, @NotNull ProcessHandler handler, int exitCode) {
                 System.out.println("Process finished: " + env.getRunnerAndConfigurationSettings().getConfiguration().getName());
                 var testId = getUUID(env.getRunnerAndConfigurationSettings().getUniqueID());
+                if (!testJobsActive.containsKey(testId)) {
+                    return;
+                }
                 testJobsActive.put(testId, false);
                 testResultsWindow.updateTest(testId,
                         exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
