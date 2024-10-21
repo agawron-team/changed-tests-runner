@@ -5,9 +5,13 @@
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/MARKETPLACE_ID.svg)](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID)
 
 <!-- Plugin description -->
-This Fancy IntelliJ Platform Plugin will run recently changed JUnit >=4 tests based on uncommitted changes from your VCS.
+This plugin will run recently changed JUnit >=4 tests based on uncommitted changes from your VCS.
 
-The development of the plugin was a part of Innovation Sprint in Atlassian Data Center team in Sydney.
+The development of the plugin was a part of Innovation Sprint in Atlassian Data Center team.
+
+Usage: 
+Click Tools menu -> Run changed tests.
+Or open the "Test Results" tool window and click the "Run changed tests" button.
 
 Author: Andrew Gawron (GitHub: https://github.com/agawron-team/)
 <!-- Plugin description end -->
