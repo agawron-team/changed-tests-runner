@@ -6,7 +6,7 @@ plugins {
     //id("java") // Java support
     //id("com.intellij.java")
     //id("com.intellij.gradle")
-    id("net.bytebuddy.byte-buddy-gradle-plugin") version "1.15.4"
+    id("net.bytebuddy.byte-buddy-gradle-plugin") version "1.15.7"
     alias(libs.plugins.kotlin) // Kotlin support
     alias(libs.plugins.intelliJPlatform) // IntelliJ Platform Gradle Plugin
     alias(libs.plugins.changelog) // Gradle Changelog Plugin
