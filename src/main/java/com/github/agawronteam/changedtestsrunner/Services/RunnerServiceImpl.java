@@ -73,7 +73,7 @@ public class RunnerServiceImpl {
 
         var runManager = getRunManagerInstance(project);
 
-        var testJobConfigs = getRunConfigurationsFromChangedFiles(project, changedTestFiles, runManager);
+        var testJobConfigs = getRunConfigurationsForChangedFiles(project, changedTestFiles, runManager);
 
         if (testJobConfigs.isEmpty()) {
             isPreparingExecution = false;
@@ -177,7 +177,7 @@ public class RunnerServiceImpl {
         }
     }
 
-    private List<TestJobConfig> getRunConfigurationsFromChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManager runManager) {
+    private List<TestJobConfig> getRunConfigurationsForChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManager runManager) {
         var testJobConfigs = new LinkedList<TestJobConfig>();
         for (var virtualFile : changedTestFiles) {
             PsiFile psiFile = getPsiManagerInstance(project).findFile(virtualFile);
