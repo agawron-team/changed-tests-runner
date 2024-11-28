@@ -9,7 +9,7 @@ This plugin will run recently changed JUnit tests based on uncommitted changes i
 
 Usage: 
 Click <q>Tools</q> menu then choose <q>Run changed tests</q>.
-Or open the <q>Test Results</q> tool window and click the <q>Run changed tests</q> button.
+Or open <q>Test Results</q> tool window and click <q>Run changed tests</q> button.
 
 Author: Andrew Gawron (GitHub: https://github.com/agawron-team/)
 Copyright (c) 2024 Atlassian US, Inc.

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+- support for IntelliJ IDEA 2024.3
+
 ## [0.0.1] - 2024-10-21
 
 ### Initial release
