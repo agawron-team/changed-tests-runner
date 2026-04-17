@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-17
+- removed compatibility limit
+
+## [0.0.2] - 2024-11-28
+
 - support for IntelliJ IDEA 2024.3
 
 ## [0.0.1] - 2024-10-21
