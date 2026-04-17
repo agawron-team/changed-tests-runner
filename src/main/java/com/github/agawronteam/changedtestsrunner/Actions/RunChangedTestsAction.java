@@ -23,14 +23,13 @@ public class RunChangedTestsAction extends AnAction {
 
     @Override
     public void update(@NotNull AnActionEvent event) {
-        // Using the event, evaluate the context,
-        // and enable or disable the action.
+        // Toggle the action text based on whether tests are running.
         Project project = event.getProject();
         var service = project.getService(RunnerService.class);
         if (service.isRunningTests()) {
-            event.getPresentation().setEnabled(false);
+            event.getPresentation().setText("Stop tests execution");
         } else {
-            event.getPresentation().setEnabled(true);
+            event.getPresentation().setText("Run changed tests");
         }
     }
 
@@ -38,6 +37,12 @@ public class RunChangedTestsAction extends AnAction {
     public void actionPerformed(@NotNull AnActionEvent event) {
         Project project = event.getProject();
         var service = project.getService(RunnerService.class);
+
+        if (service.isRunningTests()) {
+            service.stopTests();
+            return;
+        }
+
         ToolWindowManager.getInstance(project).getToolWindow("Test Results").show(() -> {
         });
 

@@ -32,6 +32,10 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         return runnerServiceImpl.isRunningTests();
     }
 
+    public void stopTests() {
+        runnerServiceImpl.stopTests();
+    }
+
     public void runRecentlyChangedTests(Project project) {
         runnerServiceImpl.runRecentlyChangedTests(project);
     }

@@ -38,8 +38,11 @@ public class RunnerServiceImpl {
     private boolean detectAffectedTests = false;
     private ResultsWindowFactory.TestResultsWindow testResultsWindow;
     private HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
+    private HashMap<UUID, ProcessHandler> activeProcessHandlers = new HashMap<>();
     private HashMap<Project, Boolean> subscribedProjects = new HashMap<>();
     private boolean isPreparingExecution = false;
+    private volatile boolean isStopping = false;
+    private Project currentProject = null;
 
     protected RunManager getRunManagerInstance(Project project) {
         return RunManager.getInstance(project);
@@ -66,12 +69,71 @@ public class RunnerServiceImpl {
                 .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runnerAndConfigurationSettings);
     }
 
+    public void stopTests() {
+        // Signal that we want to stop — queued jobs that haven't started yet will
+        // be aborted in the processStartScheduled / processStarted listeners.
+        // isStopping must remain true until all jobs have finished terminating;
+        // it is cleared by checkAndResetStoppingState() once no active jobs remain.
+        isStopping = true;
+        isPreparingExecution = false;
+
+        // Immediately grey out the stop button in the results window
+        if (testResultsWindow != null) {
+            testResultsWindow.onStopRequested();
+        }
+
+        // Destroy any process handlers we are directly tracking.
+        for (ProcessHandler handler : activeProcessHandlers.values()) {
+            if (!handler.isProcessTerminated()) {
+                handler.destroyProcess();
+            }
+        }
+
+        // Cancel all queued and running executions tracked by the IDE's ExecutionManager.
+        // getRunningDescriptors() takes a Condition<RunnerAndConfigurationSettings> and returns
+        // a list of RunContentDescriptor — each descriptor holds the ProcessHandler to destroy.
+        if (currentProject != null) {
+            ExecutionManager executionManager = ExecutionManager.getInstance(currentProject);
+            executionManager.getRunningDescriptors((RunnerAndConfigurationSettings settings) -> {
+                UUID testId = getUUID(settings.getUniqueID());
+                return testJobsActive.containsKey(testId);
+            }).forEach(descriptor -> {
+                ProcessHandler handler = descriptor.getProcessHandler();
+                if (handler != null && !handler.isProcessTerminated()) {
+                    handler.destroyProcess();
+                }
+            });
+        }
+
+        // If there are no active jobs left at all (e.g. stop was clicked before anything started),
+        // reset immediately.
+        checkAndResetStoppingState();
+    }
+
+    /**
+     * Resets the stopping state once all tracked jobs are no longer active.
+     * Called after each job completes/cancels while isStopping is true.
+     */
+    private void checkAndResetStoppingState() {
+        if (isStopping && !isPreparingExecution && testJobsActive.values().stream().noneMatch(Boolean::booleanValue)) {
+            activeProcessHandlers.clear();
+            testJobsActive.clear();
+            isStopping = false;
+            if (testResultsWindow != null) {
+                testResultsWindow.onTestsFinished();
+            }
+        }
+    }
+
     public void runRecentlyChangedTests(Project project) {
         if (isRunningTests()) {
             return;
         }
         isPreparingExecution = true;
+        isStopping = false;
+        currentProject = project;
         testJobsActive.clear();
+        activeProcessHandlers.clear();
         var changedFiles = getUncommittedChanges(project);
         var changedSourceFiles = changedFiles.stream().filter(file -> {
             String fileTypeName = file.getFileType().getName().toLowerCase();
@@ -143,6 +205,12 @@ public class RunnerServiceImpl {
                 if (!testJobsActive.containsKey(testId)) {
                     return;
                 }
+                if (isStopping) {
+                    testJobsActive.put(testId, false);
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    checkAndResetStoppingState();
+                    return;
+                }
                 testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.QUEUED);
@@ -155,7 +223,15 @@ public class RunnerServiceImpl {
                 if (!testJobsActive.containsKey(testId)) {
                     return;
                 }
+                if (isStopping) {
+                    handler.destroyProcess();
+                    testJobsActive.put(testId, false);
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    checkAndResetStoppingState();
+                    return;
+                }
                 testJobsActive.put(testId, true);
+                activeProcessHandlers.put(testId, handler);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.RUNNING);
             }
@@ -168,8 +244,14 @@ public class RunnerServiceImpl {
                     return;
                 }
                 testJobsActive.put(testId, false);
+                activeProcessHandlers.remove(testId);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.FAILED);
+                checkAndResetStoppingState();
+                // If all jobs are done notify the window
+                if (!isRunningTests() && testResultsWindow != null) {
+                    testResultsWindow.onTestsFinished();
+                }
             }
 
             @Override
@@ -180,8 +262,18 @@ public class RunnerServiceImpl {
                     return;
                 }
                 testJobsActive.put(testId, false);
-                testResultsWindow.updateTest(testId,
-                        exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+                activeProcessHandlers.remove(testId);
+                if (isStopping) {
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    checkAndResetStoppingState();
+                } else {
+                    testResultsWindow.updateTest(testId,
+                            exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+                    // If all jobs are done and we're not stopping, notify the window
+                    if (!isRunningTests() && testResultsWindow != null) {
+                        testResultsWindow.onTestsFinished();
+                    }
+                }
             }
         });
     }
