@@ -105,10 +105,16 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             });
             panel.add(runChangedTestsButton);
 
-            var checkbox = new JCheckBox("Save run configurations");
-            checkbox.setSelected(service.isShouldSaveConfig());
-            checkbox.addActionListener(e -> service.triggerSaveConfig(e));
-            panel.add(checkbox);
+            var saveConfigCheckbox = new JCheckBox("Save run configurations");
+            saveConfigCheckbox.setSelected(service.isShouldSaveConfig());
+            saveConfigCheckbox.addActionListener(e -> service.triggerSaveConfig(e));
+            panel.add(saveConfigCheckbox);
+
+            var detectAffectedCheckbox = new JCheckBox("Detect affected tests");
+            detectAffectedCheckbox.setToolTipText("Also run test classes that reference changed production code");
+            detectAffectedCheckbox.setSelected(service.isDetectAffectedTests());
+            detectAffectedCheckbox.addActionListener(e -> service.triggerDetectAffectedTests(e));
+            panel.add(detectAffectedCheckbox);
 
             prepareTree(panel, "Test results");
             return scroller;

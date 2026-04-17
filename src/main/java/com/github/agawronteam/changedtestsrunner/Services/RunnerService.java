@@ -40,6 +40,10 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         setShouldSaveConfig(((JCheckBox) e.getSource()).isSelected());
     }
 
+    public void triggerDetectAffectedTests(ActionEvent e) {
+        setDetectAffectedTests(((JCheckBox) e.getSource()).isSelected());
+    }
+
     public void registerResultsWindow(ResultsWindowFactory.TestResultsWindow testResultsWindow) {
         runnerServiceImpl.registerResultsWindow(testResultsWindow);
     }
@@ -50,5 +54,13 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
     public void setShouldSaveConfig(boolean shouldSaveConfig) {
         runnerServiceImpl.setShouldSaveConfig(shouldSaveConfig);
+    }
+
+    public boolean isDetectAffectedTests() {
+        return runnerServiceImpl.isDetectAffectedTests();
+    }
+
+    public void setDetectAffectedTests(boolean detectAffectedTests) {
+        runnerServiceImpl.setDetectAffectedTests(detectAffectedTests);
     }
 }

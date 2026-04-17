@@ -17,13 +17,17 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.searches.ReferencesSearch;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +35,7 @@ import java.util.UUID;
 public class RunnerServiceImpl {
 
     private boolean shouldSaveConfig = false;
+    private boolean detectAffectedTests = false;
     private ResultsWindowFactory.TestResultsWindow testResultsWindow;
     private HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
     private HashMap<Project, Boolean> subscribedProjects = new HashMap<>();
@@ -68,16 +73,29 @@ public class RunnerServiceImpl {
         isPreparingExecution = true;
         testJobsActive.clear();
         var changedFiles = getUncommittedChanges(project);
-        var changedTestFiles = changedFiles.stream().filter(file -> {
+        var changedSourceFiles = changedFiles.stream().filter(file -> {
             String fileTypeName = file.getFileType().getName().toLowerCase();
             return fileTypeName.equals("java") || fileTypeName.equals("kotlin");
         }).toList();
 
         var runManager = getRunManagerInstance(project);
 
-        var testJobConfigs = getRunConfigurationsForChangedFiles(project, changedTestFiles, runManager);
+        // Use a LinkedHashMap keyed by UUID to deduplicate configs from both paths
+        var testJobConfigMap = new LinkedHashMap<UUID, TestJobConfig>();
 
-        if (testJobConfigs.isEmpty()) {
+        // 1. Direct changed test files
+        for (var config : getRunConfigurationsForChangedFiles(project, changedSourceFiles, runManager)) {
+            testJobConfigMap.put(config.id, config);
+        }
+
+        // 2. If "detect affected tests" is on, also find tests that reference changed production classes
+        if (detectAffectedTests) {
+            for (var config : getAffectedTestConfigurations(project, changedSourceFiles, runManager)) {
+                testJobConfigMap.putIfAbsent(config.id, config);
+            }
+        }
+
+        if (testJobConfigMap.isEmpty()) {
             isPreparingExecution = false;
             testResultsWindow.reset("No tests to run");
             return;
@@ -85,7 +103,7 @@ public class RunnerServiceImpl {
         // Clear the results window only if there are tests to run
         testResultsWindow.reset("Tests results");
 
-        executeConfigurations(project, testJobConfigs, runManager);
+        executeConfigurations(project, new LinkedList<>(testJobConfigMap.values()), runManager);
 
         subscribeToExecutionEvents(project);
         testResultsWindow.expandAll();
@@ -102,6 +120,14 @@ public class RunnerServiceImpl {
 
     public void setShouldSaveConfig(boolean shouldSaveConfig) {
         this.shouldSaveConfig = shouldSaveConfig;
+    }
+
+    public boolean isDetectAffectedTests() {
+        return detectAffectedTests;
+    }
+
+    public void setDetectAffectedTests(boolean detectAffectedTests) {
+        this.detectAffectedTests = detectAffectedTests;
     }
 
     private void subscribeToExecutionEvents(Project project) {
@@ -194,6 +220,51 @@ public class RunnerServiceImpl {
                     var testJobConfig = getTestJobConfigs(javaFileClass, runManager, getJUnitConfigurationTypeInstance(), virtualFile);
                     testJobConfigs.add(testJobConfig);
                 }
+            }
+        }
+        return testJobConfigs;
+    }
+
+    /**
+     * For each changed source file that is NOT itself a test class, finds all test classes
+     * that directly reference (import or use) any of the changed classes.
+     */
+    private List<TestJobConfig> getAffectedTestConfigurations(Project project, List<VirtualFile> changedSourceFiles, RunManager runManager) {
+        var testJobConfigs = new LinkedList<TestJobConfig>();
+        var scope = GlobalSearchScope.projectScope(project);
+
+        for (var virtualFile : changedSourceFiles) {
+            PsiFile psiFile = getPsiManagerInstance(project).findFile(virtualFile);
+            if (!(psiFile instanceof PsiJavaFile psiJavaFile)) {
+                continue;
+            }
+
+            for (PsiClass changedClass : psiJavaFile.getClasses()) {
+                // Skip if the changed class is itself a test — already covered by the direct path
+                if (isJUnitClass(changedClass)) {
+                    continue;
+                }
+
+                // Search for all references to this class in the project scope
+                ReferencesSearch.search(changedClass, scope).forEach(reference -> {
+                    PsiElement element = reference.getElement();
+                    PsiFile referencingFile = element.getContainingFile();
+                    if (!(referencingFile instanceof PsiJavaFile referencingJavaFile)) {
+                        return true; // continue
+                    }
+
+                    for (PsiClass referencingClass : referencingJavaFile.getClasses()) {
+                        if (isJUnitClass(referencingClass)) {
+                            var config = getTestJobConfigs(
+                                    referencingClass, runManager,
+                                    getJUnitConfigurationTypeInstance(),
+                                    referencingFile.getVirtualFile()
+                            );
+                            testJobConfigs.add(config);
+                        }
+                    }
+                    return true; // continue iteration
+                });
             }
         }
         return testJobConfigs;

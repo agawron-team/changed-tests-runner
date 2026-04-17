@@ -290,6 +290,62 @@ public class RunnerServiceImplTest {
     }
 
     // -------------------------------------------------------------------------
+    // Detect affected tests - flag behaviour
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void detectAffectedTests_defaultIsOff() {
+        assertFalse(runnerService.isDetectAffectedTests());
+    }
+
+    @Test
+    public void detectAffectedTests_canBeEnabled() {
+        runnerService.setDetectAffectedTests(true);
+        assertTrue(runnerService.isDetectAffectedTests());
+    }
+
+    @Test
+    public void detectAffectedTests_canBeDisabledAgain() {
+        runnerService.setDetectAffectedTests(true);
+        runnerService.setDetectAffectedTests(false);
+        assertFalse(runnerService.isDetectAffectedTests());
+    }
+
+    @Test
+    public void detectAffectedTests_whenOffAndChangedFileIsProductionCode_doesNotSearchForReferences() {
+        // Arrange: changed file is NOT a test class (no @Test annotations on methods or class)
+        runnerService.registerResultsWindow(testResultsWindow);
+        runnerService.setDetectAffectedTests(false);
+        when(changeListManager.getAffectedFiles()).thenReturn(List.of(uncommitedFile));
+        when(uncommitedFile.getFileType()).thenReturn(fileType);
+        when(fileType.getName()).thenReturn("JAVA");
+        when(psiManager.findFile(uncommitedFile)).thenReturn(psiFile);
+        when(psiFile.getClasses()).thenReturn(new PsiClass[]{psiClass});
+        when(psiClass.getAllMethods()).thenReturn(new PsiMethod[]{psiMethod});
+        when(psiMethod.hasAnnotation(any())).thenReturn(false);
+        when(psiClass.hasAnnotation(any())).thenReturn(false);
+
+        runnerService.runRecentlyChangedTests(project);
+
+        // No tests found, no run configured
+        verify(testResultsWindow, times(1)).reset("No tests to run");
+        verify(jUnitConfiguration, never()).setMainClass(any());
+    }
+
+    @Test
+    public void detectAffectedTests_whenOffChangedTestClassIsStillRun() {
+        // Even when detectAffectedTests is off, directly changed test files are still run
+        setupJUnitInfrastructure();
+        runnerService.setDetectAffectedTests(false);
+        when(psiMethod.hasAnnotation("org.junit.Test")).thenReturn(true);
+
+        runnerService.runRecentlyChangedTests(project);
+
+        assertTrue(runnerService.isRunningTests());
+        verify(jUnitConfiguration, times(1)).setMainClass(psiClass);
+    }
+
+    // -------------------------------------------------------------------------
     // Helper
     // -------------------------------------------------------------------------
 
