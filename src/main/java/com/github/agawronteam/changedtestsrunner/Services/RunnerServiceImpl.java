@@ -68,8 +68,10 @@ public class RunnerServiceImpl {
         isPreparingExecution = true;
         testJobsActive.clear();
         var changedFiles = getUncommittedChanges(project);
-        var changedTestFiles = changedFiles.stream().filter(file ->
-                file.getFileType().getName().toLowerCase().equals("java")).toList();
+        var changedTestFiles = changedFiles.stream().filter(file -> {
+            String fileTypeName = file.getFileType().getName().toLowerCase();
+            return fileTypeName.equals("java") || fileTypeName.equals("kotlin");
+        }).toList();
 
         var runManager = getRunManagerInstance(project);
 
@@ -201,9 +203,26 @@ public class RunnerServiceImpl {
         return UUID.nameUUIDFromBytes((name).getBytes());
     }
 
+    private static final List<String> TEST_ANNOTATIONS = List.of(
+            "org.junit.Test",                    // JUnit 4
+            "org.junit.jupiter.api.Test",        // JUnit 5
+            "org.junit.jupiter.params.ParameterizedTest", // JUnit 5 parameterized
+            "org.junit.jupiter.api.RepeatedTest" // JUnit 5 repeated
+    );
+
+    private static final List<String> TEST_CLASS_ANNOTATIONS = List.of(
+            "org.junit.runner.RunWith",          // JUnit 4 runner (e.g. suites)
+            "org.junit.jupiter.api.extension.ExtendWith" // JUnit 5 extension
+    );
+
     private boolean isJUnitClass(PsiClass psiClass) {
-        // TODO: find a better way of finding out if a class is a JUnit test
-        return Arrays.stream(psiClass.getAllMethods()).anyMatch(method -> method.getModifierList().toString().contains("@Test"));
+        // Check for test class-level annotations (e.g. @RunWith, @ExtendWith)
+        if (TEST_CLASS_ANNOTATIONS.stream().anyMatch(psiClass::hasAnnotation)) {
+            return true;
+        }
+        // Check for test method annotations (JUnit 4 @Test, JUnit 5 @Test, @ParameterizedTest, etc.)
+        return Arrays.stream(psiClass.getAllMethods())
+                .anyMatch(method -> TEST_ANNOTATIONS.stream().anyMatch(method::hasAnnotation));
     }
 
     private @NotNull List<VirtualFile> getUncommittedChanges(Project project) {
@@ -216,6 +235,8 @@ public class RunnerServiceImpl {
         var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configFactory);
         var junitConfig = (JUnitConfiguration) runnerAndConfigurationSettings.getConfiguration();
         junitConfig.setMainClass(javaFileClass);
-        return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), junitConfig.getModules()[0].getName(), junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
+        var modules = junitConfig.getModules();
+        var moduleName = (modules != null && modules.length > 0) ? modules[0].getName() : "";
+        return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), moduleName, junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
     }
 }
