@@ -27,6 +27,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.util.HashMap;
 import java.util.UUID;
+import java.awt.EventQueue;
 
 public class ResultsWindowFactory implements ToolWindowFactory {
 
@@ -35,7 +36,8 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         QUEUED("Queued"),
         RUNNING("Running"),
         OK("OK"),
-        FAILED("Failed");
+        FAILED("Failed"),
+        CANCELLED("Cancelled");
 
         private String text;
 
@@ -95,20 +97,32 @@ public class ResultsWindowFactory implements ToolWindowFactory {
             runChangedTestsButton = new JButton("Run changed tests");
 
             runChangedTestsButton.addActionListener(e -> {
-                var backgroundTask = new Task.Backgroundable(project, "Running recently changed tests...") {
-                    @Override
-                    public void run(@NotNull ProgressIndicator indicator) {
-                        ApplicationManager.getApplication().runReadAction(() -> service.runRecentlyChangedTests(project));
-                    }
-                };
-                backgroundTask.queue();
+                if (service.isRunningTests()) {
+                    // Grey out the button immediately so it can't be clicked again while stopping
+                    runChangedTestsButton.setEnabled(false);
+                    service.stopTests();
+                } else {
+                    var backgroundTask = new Task.Backgroundable(project, "Running recently changed tests...") {
+                        @Override
+                        public void run(@NotNull ProgressIndicator indicator) {
+                            ApplicationManager.getApplication().runReadAction(() -> service.runRecentlyChangedTests(project));
+                        }
+                    };
+                    backgroundTask.queue();
+                }
             });
             panel.add(runChangedTestsButton);
 
-            var checkbox = new JCheckBox("Save run configurations");
-            checkbox.setSelected(service.isShouldSaveConfig());
-            checkbox.addActionListener(e -> service.triggerSaveConfig(e));
-            panel.add(checkbox);
+            var saveConfigCheckbox = new JCheckBox("Save run configurations");
+            saveConfigCheckbox.setSelected(service.isShouldSaveConfig());
+            saveConfigCheckbox.addActionListener(e -> service.triggerSaveConfig(e));
+            panel.add(saveConfigCheckbox);
+
+            var detectAffectedCheckbox = new JCheckBox("Detect affected tests");
+            detectAffectedCheckbox.setToolTipText("Also run test classes that reference changed production code");
+            detectAffectedCheckbox.setSelected(service.isDetectAffectedTests());
+            detectAffectedCheckbox.addActionListener(e -> service.triggerDetectAffectedTests(e));
+            panel.add(detectAffectedCheckbox);
 
             prepareTree(panel, "Test results");
             return scroller;
@@ -184,11 +198,28 @@ public class ResultsWindowFactory implements ToolWindowFactory {
         }
 
         public void disableIfRunning() {
-            if (!service.isRunningTests()) {
-                runChangedTestsButton.setEnabled(true);
-            } else {
+            EventQueue.invokeLater(() -> {
+                if (service.isRunningTests()) {
+                    runChangedTestsButton.setText("Stop tests execution");
+                    runChangedTestsButton.setEnabled(true);
+                } else {
+                    runChangedTestsButton.setText("Run changed tests");
+                    runChangedTestsButton.setEnabled(true);
+                }
+            });
+        }
+
+        public void onStopRequested() {
+            EventQueue.invokeLater(() -> {
                 runChangedTestsButton.setEnabled(false);
-            }
+            });
+        }
+
+        public void onTestsFinished() {
+            EventQueue.invokeLater(() -> {
+                runChangedTestsButton.setText("Run changed tests");
+                runChangedTestsButton.setEnabled(true);
+            });
         }
 
         public void reset(String message) {

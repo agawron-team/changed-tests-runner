@@ -22,6 +22,9 @@ public class TestResultsTreeCellRenderer extends DefaultTreeCellRenderer {
             } else if (data.status.equals(ResultsWindowFactory.TestStatus.OK)){
                 newComponent.setForeground(Color.green);
                 newComponent.setOpaque(true);
+            } else if (data.status.equals(ResultsWindowFactory.TestStatus.CANCELLED)){
+                newComponent.setForeground(Color.orange);
+                newComponent.setOpaque(true);
             }
             return newComponent;
         }

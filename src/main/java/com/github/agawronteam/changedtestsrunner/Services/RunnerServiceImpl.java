@@ -17,24 +17,36 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.searches.ReferencesSearch;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 
 public class RunnerServiceImpl {
 
     private boolean shouldSaveConfig = false;
+    private boolean detectAffectedTests = false;
     private ResultsWindowFactory.TestResultsWindow testResultsWindow;
     private HashMap<UUID, Boolean> testJobsActive = new HashMap<>();
+    private HashMap<UUID, ProcessHandler> activeProcessHandlers = new HashMap<>();
     private HashMap<Project, Boolean> subscribedProjects = new HashMap<>();
     private boolean isPreparingExecution = false;
+    private volatile boolean isStopping = false;
+    private Project currentProject = null;
+    /** Queue of configs waiting to be launched one-by-one. */
+    private Queue<TestJobConfig> pendingConfigs = new LinkedList<>();
+    private RunManager currentRunManager = null;
 
     protected RunManager getRunManagerInstance(Project project) {
         return RunManager.getInstance(project);
@@ -45,7 +57,13 @@ public class RunnerServiceImpl {
     }
 
     public boolean isRunningTests() {
-        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue) || isPreparingExecution;
+        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue)
+                || isPreparingExecution
+                || !pendingConfigs.isEmpty();
+    }
+
+    public boolean isStopping() {
+        return isStopping;
     }
 
     public PsiManager getPsiManagerInstance(Project project) {
@@ -61,21 +79,91 @@ public class RunnerServiceImpl {
                 .createOrNull(DefaultRunExecutor.getRunExecutorInstance(), runnerAndConfigurationSettings);
     }
 
+    public void stopTests() {
+        // Signal that we want to stop — queued jobs that haven't started yet will
+        // be aborted in the processStartScheduled / processStarted listeners.
+        // isStopping must remain true until all jobs have finished terminating;
+        // it is cleared by checkAndResetStoppingState() once no active jobs remain.
+        isStopping = true;
+        isPreparingExecution = false;
+
+        // Immediately cancel all pending (not-yet-launched) configs from the sequential queue.
+        // This prevents launchNextPending() from starting any more tests.
+        while (!pendingConfigs.isEmpty()) {
+            TestJobConfig pending = pendingConfigs.poll();
+            testJobsActive.put(pending.id, false);
+            if (testResultsWindow != null) {
+                testResultsWindow.updateTest(pending.id, ResultsWindowFactory.TestStatus.CANCELLED);
+            }
+        }
+
+        // Immediately grey out the stop button in the results window
+        if (testResultsWindow != null) {
+            testResultsWindow.onStopRequested();
+        }
+
+        // Destroy any process handlers we are directly tracking.
+        for (ProcessHandler handler : activeProcessHandlers.values()) {
+            if (!handler.isProcessTerminated()) {
+                handler.destroyProcess();
+            }
+        }
+
+        // If there are no active jobs left at all (e.g. stop was clicked before anything started),
+        // reset immediately.
+        checkAndResetStoppingState();
+    }
+
+    /**
+     * Resets the stopping state once all tracked jobs are no longer active.
+     * Called after each job completes/cancels while isStopping is true.
+     */
+    private void checkAndResetStoppingState() {
+        if (isStopping && !isPreparingExecution && testJobsActive.values().stream().noneMatch(Boolean::booleanValue)) {
+            activeProcessHandlers.clear();
+            testJobsActive.clear();
+            isStopping = false;
+            if (testResultsWindow != null) {
+                testResultsWindow.onTestsFinished();
+            }
+        }
+    }
+
     public void runRecentlyChangedTests(Project project) {
         if (isRunningTests()) {
             return;
         }
         isPreparingExecution = true;
+        isStopping = false;
+        currentProject = project;
         testJobsActive.clear();
+        activeProcessHandlers.clear();
+        pendingConfigs.clear();
         var changedFiles = getUncommittedChanges(project);
-        var changedTestFiles = changedFiles.stream().filter(file ->
-                file.getFileType().getName().toLowerCase().equals("java")).toList();
+        var changedSourceFiles = changedFiles.stream().filter(file -> {
+            String fileTypeName = file.getFileType().getName().toLowerCase();
+            return fileTypeName.equals("java") || fileTypeName.equals("kotlin");
+        }).toList();
 
         var runManager = getRunManagerInstance(project);
+        currentRunManager = runManager;
 
-        var testJobConfigs = getRunConfigurationsForChangedFiles(project, changedTestFiles, runManager);
+        // Use a LinkedHashMap keyed by UUID to deduplicate configs from both paths
+        var testJobConfigMap = new LinkedHashMap<UUID, TestJobConfig>();
 
-        if (testJobConfigs.isEmpty()) {
+        // 1. Direct changed test files
+        for (var config : getRunConfigurationsForChangedFiles(project, changedSourceFiles, runManager)) {
+            testJobConfigMap.put(config.id, config);
+        }
+
+        // 2. If "detect affected tests" is on, also find tests that reference changed production classes
+        if (detectAffectedTests) {
+            for (var config : getAffectedTestConfigurations(project, changedSourceFiles, runManager)) {
+                testJobConfigMap.putIfAbsent(config.id, config);
+            }
+        }
+
+        if (testJobConfigMap.isEmpty()) {
             isPreparingExecution = false;
             testResultsWindow.reset("No tests to run");
             return;
@@ -83,11 +171,23 @@ public class RunnerServiceImpl {
         // Clear the results window only if there are tests to run
         testResultsWindow.reset("Tests results");
 
-        executeConfigurations(project, testJobConfigs, runManager);
+        // Register all test jobs in the results window upfront, then subscribe to events,
+        // then launch the first one. Subsequent ones are launched sequentially as each finishes.
+        List<TestJobConfig> allConfigs = new LinkedList<>(testJobConfigMap.values());
+        for (var testJobConfig : allConfigs) {
+            testJobsActive.put(testJobConfig.id, false);
+            testResultsWindow.addTest(testJobConfig.id, testJobConfig);
+        }
+        pendingConfigs.addAll(allConfigs);
 
+        // Subscribe BEFORE launching so we never miss an event
         subscribeToExecutionEvents(project);
+
         testResultsWindow.expandAll();
         isPreparingExecution = false;
+
+        // Launch the first test; subsequent tests are launched from the processTerminated listener
+        launchNextPending(project, runManager);
     }
 
     public void registerResultsWindow(ResultsWindowFactory.TestResultsWindow testResultsWindow) {
@@ -100,6 +200,14 @@ public class RunnerServiceImpl {
 
     public void setShouldSaveConfig(boolean shouldSaveConfig) {
         this.shouldSaveConfig = shouldSaveConfig;
+    }
+
+    public boolean isDetectAffectedTests() {
+        return detectAffectedTests;
+    }
+
+    public void setDetectAffectedTests(boolean detectAffectedTests) {
+        this.detectAffectedTests = detectAffectedTests;
     }
 
     private void subscribeToExecutionEvents(Project project) {
@@ -115,6 +223,12 @@ public class RunnerServiceImpl {
                 if (!testJobsActive.containsKey(testId)) {
                     return;
                 }
+                if (isStopping) {
+                    testJobsActive.put(testId, false);
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    checkAndResetStoppingState();
+                    return;
+                }
                 testJobsActive.put(testId, true);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.QUEUED);
@@ -127,7 +241,15 @@ public class RunnerServiceImpl {
                 if (!testJobsActive.containsKey(testId)) {
                     return;
                 }
+                if (isStopping) {
+                    handler.destroyProcess();
+                    testJobsActive.put(testId, false);
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    checkAndResetStoppingState();
+                    return;
+                }
                 testJobsActive.put(testId, true);
+                activeProcessHandlers.put(testId, handler);
                 testResultsWindow.updateTest(testId,
                         ResultsWindowFactory.TestStatus.RUNNING);
             }
@@ -140,8 +262,10 @@ public class RunnerServiceImpl {
                     return;
                 }
                 testJobsActive.put(testId, false);
-                testResultsWindow.updateTest(testId,
-                        ResultsWindowFactory.TestStatus.FAILED);
+                activeProcessHandlers.remove(testId);
+                testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.FAILED);
+                // Launch the next test in the queue (or finish up)
+                launchNextPending(project, currentRunManager);
             }
 
             @Override
@@ -152,29 +276,66 @@ public class RunnerServiceImpl {
                     return;
                 }
                 testJobsActive.put(testId, false);
-                testResultsWindow.updateTest(testId,
-                        exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+                activeProcessHandlers.remove(testId);
+                if (isStopping) {
+                    testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    // pendingConfigs was already drained in stopTests(); just reset state
+                    checkAndResetStoppingState();
+                } else {
+                    testResultsWindow.updateTest(testId,
+                            exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
+                    // Launch the next test in the queue (or finish up if queue is empty)
+                    launchNextPending(project, currentRunManager);
+                }
             }
         });
     }
 
-    private void executeConfigurations(Project project, List<TestJobConfig> testJobConfigs, RunManager runManager) {
-        for (var testJobConfig : testJobConfigs) {
-            var runConfig = testJobConfig.runConfig;
-            ExecutionEnvironmentBuilder builder = getExecutionEnvironmentBuilder(runConfig);
-
-            var testId = getUUID(runConfig.getUniqueID());
-            testJobsActive.put(testId, true);
-            testResultsWindow.addTest(testId, testJobConfig);
-
-            if (builder != null) {
-                if (shouldSaveConfig) {
-                    runManager.addConfiguration(runConfig, false);
-                }
-
-                ExecutionManager.getInstance(project).restartRunProfile(builder.build());
-            }
+    /**
+     * Launches the next pending test configuration, if any, and if we are not stopping.
+     * Called once at the start and then again from processTerminated / processNotStarted
+     * so that only one test runs at a time.
+     */
+    private void launchNextPending(Project project, RunManager runManager) {
+        if (isStopping) {
+            checkAndResetStoppingState();
+            return;
         }
+
+        TestJobConfig testJobConfig = pendingConfigs.poll();
+        if (testJobConfig == null) {
+            // No more tests to launch; check if everything is done
+            checkAndResetStoppingState();
+            if (!isRunningTests() && testResultsWindow != null) {
+                testResultsWindow.onTestsFinished();
+            }
+            return;
+        }
+
+        var runConfig = testJobConfig.runConfig;
+        ExecutionEnvironmentBuilder builder = getExecutionEnvironmentBuilder(runConfig);
+
+        testJobsActive.put(testJobConfig.id, true);
+
+        if (builder != null) {
+            if (shouldSaveConfig) {
+                runManager.addConfiguration(runConfig, false);
+            }
+            launchJob(project, builder);
+        } else {
+            // Builder could not be created — mark as failed and move on
+            testJobsActive.put(testJobConfig.id, false);
+            testResultsWindow.updateTest(testJobConfig.id, ResultsWindowFactory.TestStatus.FAILED);
+            launchNextPending(project, runManager);
+        }
+    }
+
+    /**
+     * Actually submits a built ExecutionEnvironment to the IDE's ExecutionManager.
+     * Extracted so tests can override it without spinning up a real IDE process.
+     */
+    protected void launchJob(Project project, ExecutionEnvironmentBuilder builder) {
+        ExecutionManager.getInstance(project).restartRunProfile(builder.build());
     }
 
     private List<TestJobConfig> getRunConfigurationsForChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManager runManager) {
@@ -197,13 +358,75 @@ public class RunnerServiceImpl {
         return testJobConfigs;
     }
 
-    static UUID getUUID(String name) {
+    /**
+     * For each changed source file that is NOT itself a test class, finds all test classes
+     * that directly reference (import or use) any of the changed classes.
+     */
+    private List<TestJobConfig> getAffectedTestConfigurations(Project project, List<VirtualFile> changedSourceFiles, RunManager runManager) {
+        var testJobConfigs = new LinkedList<TestJobConfig>();
+        var scope = GlobalSearchScope.projectScope(project);
+
+        for (var virtualFile : changedSourceFiles) {
+            PsiFile psiFile = getPsiManagerInstance(project).findFile(virtualFile);
+            if (!(psiFile instanceof PsiJavaFile psiJavaFile)) {
+                continue;
+            }
+
+            for (PsiClass changedClass : psiJavaFile.getClasses()) {
+                // Skip if the changed class is itself a test — already covered by the direct path
+                if (isJUnitClass(changedClass)) {
+                    continue;
+                }
+
+                // Search for all references to this class in the project scope
+                ReferencesSearch.search(changedClass, scope).forEach(reference -> {
+                    PsiElement element = reference.getElement();
+                    PsiFile referencingFile = element.getContainingFile();
+                    if (!(referencingFile instanceof PsiJavaFile referencingJavaFile)) {
+                        return true; // continue
+                    }
+
+                    for (PsiClass referencingClass : referencingJavaFile.getClasses()) {
+                        if (isJUnitClass(referencingClass)) {
+                            var config = getTestJobConfigs(
+                                    referencingClass, runManager,
+                                    getJUnitConfigurationTypeInstance(),
+                                    referencingFile.getVirtualFile()
+                            );
+                            testJobConfigs.add(config);
+                        }
+                    }
+                    return true; // continue iteration
+                });
+            }
+        }
+        return testJobConfigs;
+    }
+
+    public static UUID getUUID(String name) {
         return UUID.nameUUIDFromBytes((name).getBytes());
     }
 
+    private static final List<String> TEST_ANNOTATIONS = List.of(
+            "org.junit.Test",                    // JUnit 4
+            "org.junit.jupiter.api.Test",        // JUnit 5
+            "org.junit.jupiter.params.ParameterizedTest", // JUnit 5 parameterized
+            "org.junit.jupiter.api.RepeatedTest" // JUnit 5 repeated
+    );
+
+    private static final List<String> TEST_CLASS_ANNOTATIONS = List.of(
+            "org.junit.runner.RunWith",          // JUnit 4 runner (e.g. suites)
+            "org.junit.jupiter.api.extension.ExtendWith" // JUnit 5 extension
+    );
+
     private boolean isJUnitClass(PsiClass psiClass) {
-        // TODO: find a better way of finding out if a class is a JUnit test
-        return Arrays.stream(psiClass.getAllMethods()).anyMatch(method -> method.getModifierList().toString().contains("@Test"));
+        // Check for test class-level annotations (e.g. @RunWith, @ExtendWith)
+        if (TEST_CLASS_ANNOTATIONS.stream().anyMatch(psiClass::hasAnnotation)) {
+            return true;
+        }
+        // Check for test method annotations (JUnit 4 @Test, JUnit 5 @Test, @ParameterizedTest, etc.)
+        return Arrays.stream(psiClass.getAllMethods())
+                .anyMatch(method -> TEST_ANNOTATIONS.stream().anyMatch(method::hasAnnotation));
     }
 
     private @NotNull List<VirtualFile> getUncommittedChanges(Project project) {
@@ -216,6 +439,8 @@ public class RunnerServiceImpl {
         var runnerAndConfigurationSettings = runManager.createConfiguration(javaFileClass.getName(), configFactory);
         var junitConfig = (JUnitConfiguration) runnerAndConfigurationSettings.getConfiguration();
         junitConfig.setMainClass(javaFileClass);
-        return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), junitConfig.getModules()[0].getName(), junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
+        var modules = junitConfig.getModules();
+        var moduleName = (modules != null && modules.length > 0) ? modules[0].getName() : "";
+        return new TestJobConfig(getUUID(runnerAndConfigurationSettings.getUniqueID()), moduleName, junitConfig.getActionName(), virtualFile, runnerAndConfigurationSettings);
     }
 }

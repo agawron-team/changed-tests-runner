@@ -32,12 +32,20 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
         return runnerServiceImpl.isRunningTests();
     }
 
+    public void stopTests() {
+        runnerServiceImpl.stopTests();
+    }
+
     public void runRecentlyChangedTests(Project project) {
         runnerServiceImpl.runRecentlyChangedTests(project);
     }
 
     public void triggerSaveConfig(ActionEvent e) {
         setShouldSaveConfig(((JCheckBox) e.getSource()).isSelected());
+    }
+
+    public void triggerDetectAffectedTests(ActionEvent e) {
+        setDetectAffectedTests(((JCheckBox) e.getSource()).isSelected());
     }
 
     public void registerResultsWindow(ResultsWindowFactory.TestResultsWindow testResultsWindow) {
@@ -50,5 +58,13 @@ public final class RunnerService implements PersistentStateComponent<RunnerServi
 
     public void setShouldSaveConfig(boolean shouldSaveConfig) {
         runnerServiceImpl.setShouldSaveConfig(shouldSaveConfig);
+    }
+
+    public boolean isDetectAffectedTests() {
+        return runnerServiceImpl.isDetectAffectedTests();
+    }
+
+    public void setDetectAffectedTests(boolean detectAffectedTests) {
+        runnerServiceImpl.setDetectAffectedTests(detectAffectedTests);
     }
 }
