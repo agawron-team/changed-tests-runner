@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 
 public class RunnerServiceImpl {
@@ -43,6 +44,9 @@ public class RunnerServiceImpl {
     private boolean isPreparingExecution = false;
     private volatile boolean isStopping = false;
     private Project currentProject = null;
+    /** Queue of configs waiting to be launched one-by-one. */
+    private Queue<TestJobConfig> pendingConfigs = new LinkedList<>();
+    private RunManager currentRunManager = null;
 
     protected RunManager getRunManagerInstance(Project project) {
         return RunManager.getInstance(project);
@@ -53,7 +57,13 @@ public class RunnerServiceImpl {
     }
 
     public boolean isRunningTests() {
-        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue) || isPreparingExecution;
+        return testJobsActive.values().stream().anyMatch(Boolean::booleanValue)
+                || isPreparingExecution
+                || !pendingConfigs.isEmpty();
+    }
+
+    public boolean isStopping() {
+        return isStopping;
     }
 
     public PsiManager getPsiManagerInstance(Project project) {
@@ -77,6 +87,16 @@ public class RunnerServiceImpl {
         isStopping = true;
         isPreparingExecution = false;
 
+        // Immediately cancel all pending (not-yet-launched) configs from the sequential queue.
+        // This prevents launchNextPending() from starting any more tests.
+        while (!pendingConfigs.isEmpty()) {
+            TestJobConfig pending = pendingConfigs.poll();
+            testJobsActive.put(pending.id, false);
+            if (testResultsWindow != null) {
+                testResultsWindow.updateTest(pending.id, ResultsWindowFactory.TestStatus.CANCELLED);
+            }
+        }
+
         // Immediately grey out the stop button in the results window
         if (testResultsWindow != null) {
             testResultsWindow.onStopRequested();
@@ -87,22 +107,6 @@ public class RunnerServiceImpl {
             if (!handler.isProcessTerminated()) {
                 handler.destroyProcess();
             }
-        }
-
-        // Cancel all queued and running executions tracked by the IDE's ExecutionManager.
-        // getRunningDescriptors() takes a Condition<RunnerAndConfigurationSettings> and returns
-        // a list of RunContentDescriptor — each descriptor holds the ProcessHandler to destroy.
-        if (currentProject != null) {
-            ExecutionManager executionManager = ExecutionManager.getInstance(currentProject);
-            executionManager.getRunningDescriptors((RunnerAndConfigurationSettings settings) -> {
-                UUID testId = getUUID(settings.getUniqueID());
-                return testJobsActive.containsKey(testId);
-            }).forEach(descriptor -> {
-                ProcessHandler handler = descriptor.getProcessHandler();
-                if (handler != null && !handler.isProcessTerminated()) {
-                    handler.destroyProcess();
-                }
-            });
         }
 
         // If there are no active jobs left at all (e.g. stop was clicked before anything started),
@@ -134,6 +138,7 @@ public class RunnerServiceImpl {
         currentProject = project;
         testJobsActive.clear();
         activeProcessHandlers.clear();
+        pendingConfigs.clear();
         var changedFiles = getUncommittedChanges(project);
         var changedSourceFiles = changedFiles.stream().filter(file -> {
             String fileTypeName = file.getFileType().getName().toLowerCase();
@@ -141,6 +146,7 @@ public class RunnerServiceImpl {
         }).toList();
 
         var runManager = getRunManagerInstance(project);
+        currentRunManager = runManager;
 
         // Use a LinkedHashMap keyed by UUID to deduplicate configs from both paths
         var testJobConfigMap = new LinkedHashMap<UUID, TestJobConfig>();
@@ -165,11 +171,23 @@ public class RunnerServiceImpl {
         // Clear the results window only if there are tests to run
         testResultsWindow.reset("Tests results");
 
-        executeConfigurations(project, new LinkedList<>(testJobConfigMap.values()), runManager);
+        // Register all test jobs in the results window upfront, then subscribe to events,
+        // then launch the first one. Subsequent ones are launched sequentially as each finishes.
+        List<TestJobConfig> allConfigs = new LinkedList<>(testJobConfigMap.values());
+        for (var testJobConfig : allConfigs) {
+            testJobsActive.put(testJobConfig.id, false);
+            testResultsWindow.addTest(testJobConfig.id, testJobConfig);
+        }
+        pendingConfigs.addAll(allConfigs);
 
+        // Subscribe BEFORE launching so we never miss an event
         subscribeToExecutionEvents(project);
+
         testResultsWindow.expandAll();
         isPreparingExecution = false;
+
+        // Launch the first test; subsequent tests are launched from the processTerminated listener
+        launchNextPending(project, runManager);
     }
 
     public void registerResultsWindow(ResultsWindowFactory.TestResultsWindow testResultsWindow) {
@@ -245,13 +263,9 @@ public class RunnerServiceImpl {
                 }
                 testJobsActive.put(testId, false);
                 activeProcessHandlers.remove(testId);
-                testResultsWindow.updateTest(testId,
-                        ResultsWindowFactory.TestStatus.FAILED);
-                checkAndResetStoppingState();
-                // If all jobs are done notify the window
-                if (!isRunningTests() && testResultsWindow != null) {
-                    testResultsWindow.onTestsFinished();
-                }
+                testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.FAILED);
+                // Launch the next test in the queue (or finish up)
+                launchNextPending(project, currentRunManager);
             }
 
             @Override
@@ -265,36 +279,63 @@ public class RunnerServiceImpl {
                 activeProcessHandlers.remove(testId);
                 if (isStopping) {
                     testResultsWindow.updateTest(testId, ResultsWindowFactory.TestStatus.CANCELLED);
+                    // pendingConfigs was already drained in stopTests(); just reset state
                     checkAndResetStoppingState();
                 } else {
                     testResultsWindow.updateTest(testId,
                             exitCode == 0 ? ResultsWindowFactory.TestStatus.OK : ResultsWindowFactory.TestStatus.FAILED);
-                    // If all jobs are done and we're not stopping, notify the window
-                    if (!isRunningTests() && testResultsWindow != null) {
-                        testResultsWindow.onTestsFinished();
-                    }
+                    // Launch the next test in the queue (or finish up if queue is empty)
+                    launchNextPending(project, currentRunManager);
                 }
             }
         });
     }
 
-    private void executeConfigurations(Project project, List<TestJobConfig> testJobConfigs, RunManager runManager) {
-        for (var testJobConfig : testJobConfigs) {
-            var runConfig = testJobConfig.runConfig;
-            ExecutionEnvironmentBuilder builder = getExecutionEnvironmentBuilder(runConfig);
-
-            var testId = getUUID(runConfig.getUniqueID());
-            testJobsActive.put(testId, true);
-            testResultsWindow.addTest(testId, testJobConfig);
-
-            if (builder != null) {
-                if (shouldSaveConfig) {
-                    runManager.addConfiguration(runConfig, false);
-                }
-
-                ExecutionManager.getInstance(project).restartRunProfile(builder.build());
-            }
+    /**
+     * Launches the next pending test configuration, if any, and if we are not stopping.
+     * Called once at the start and then again from processTerminated / processNotStarted
+     * so that only one test runs at a time.
+     */
+    private void launchNextPending(Project project, RunManager runManager) {
+        if (isStopping) {
+            checkAndResetStoppingState();
+            return;
         }
+
+        TestJobConfig testJobConfig = pendingConfigs.poll();
+        if (testJobConfig == null) {
+            // No more tests to launch; check if everything is done
+            checkAndResetStoppingState();
+            if (!isRunningTests() && testResultsWindow != null) {
+                testResultsWindow.onTestsFinished();
+            }
+            return;
+        }
+
+        var runConfig = testJobConfig.runConfig;
+        ExecutionEnvironmentBuilder builder = getExecutionEnvironmentBuilder(runConfig);
+
+        testJobsActive.put(testJobConfig.id, true);
+
+        if (builder != null) {
+            if (shouldSaveConfig) {
+                runManager.addConfiguration(runConfig, false);
+            }
+            launchJob(project, builder);
+        } else {
+            // Builder could not be created — mark as failed and move on
+            testJobsActive.put(testJobConfig.id, false);
+            testResultsWindow.updateTest(testJobConfig.id, ResultsWindowFactory.TestStatus.FAILED);
+            launchNextPending(project, runManager);
+        }
+    }
+
+    /**
+     * Actually submits a built ExecutionEnvironment to the IDE's ExecutionManager.
+     * Extracted so tests can override it without spinning up a real IDE process.
+     */
+    protected void launchJob(Project project, ExecutionEnvironmentBuilder builder) {
+        ExecutionManager.getInstance(project).restartRunProfile(builder.build());
     }
 
     private List<TestJobConfig> getRunConfigurationsForChangedFiles(Project project, List<VirtualFile> changedTestFiles, RunManager runManager) {
@@ -362,7 +403,7 @@ public class RunnerServiceImpl {
         return testJobConfigs;
     }
 
-    static UUID getUUID(String name) {
+    public static UUID getUUID(String name) {
         return UUID.nameUUIDFromBytes((name).getBytes());
     }
 

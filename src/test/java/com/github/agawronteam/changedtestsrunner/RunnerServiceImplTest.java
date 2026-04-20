@@ -30,6 +30,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -79,7 +80,16 @@ public class RunnerServiceImplTest {
 
         @Override
         public ExecutionEnvironmentBuilder getExecutionEnvironmentBuilder(RunnerAndConfigurationSettings runnerAndConfigurationSettings) {
-            return null;
+            // Return a non-null mock so launchJob() is called (not the null/failed branch)
+            return mock(ExecutionEnvironmentBuilder.class);
+        }
+
+        @Override
+        protected void launchJob(Project project, ExecutionEnvironmentBuilder builder) {
+            // Do nothing — simulate a job that has been launched but not yet terminated.
+            // The job remains active (testJobsActive = true) until a processTerminated
+            // event arrives, which in unit tests never fires. This mirrors the real
+            // behaviour where isRunningTests() returns true while the process runs.
         }
     }
 
@@ -287,6 +297,107 @@ public class RunnerServiceImplTest {
         runnerService.runRecentlyChangedTests(project);
 
         assertTrue(runnerService.isRunningTests());
+    }
+
+    // -------------------------------------------------------------------------
+    // Stop behaviour
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void stopTests_whileRunning_cancelsRemainingQueuedTests() {
+        // Arrange: set up two changed test files so two jobs are discovered
+        VirtualFile secondFile = mock(VirtualFile.class);
+        FileType secondFileType = mock(FileType.class);
+        PsiJavaFile secondPsiFile = mock(PsiJavaFile.class);
+        PsiClass secondPsiClass = mock(PsiClass.class);
+        PsiMethod secondPsiMethod = mock(PsiMethod.class);
+        RunnerAndConfigurationSettings secondConfigSettings = mock(RunnerAndConfigurationSettings.class);
+        JUnitConfiguration secondJUnitConfiguration = mock(JUnitConfiguration.class);
+
+        runnerService.registerResultsWindow(testResultsWindow);
+        when(changeListManager.getAffectedFiles()).thenReturn(List.of(uncommitedFile, secondFile));
+
+        // First file
+        when(uncommitedFile.getFileType()).thenReturn(fileType);
+        when(fileType.getName()).thenReturn("JAVA");
+        when(psiManager.findFile(uncommitedFile)).thenReturn(psiFile);
+        when(psiFile.getClasses()).thenReturn(new PsiClass[]{psiClass});
+        when(psiClass.getAllMethods()).thenReturn(new PsiMethod[]{psiMethod});
+        when(psiClass.getName()).thenReturn("FirstTest");
+        when(psiMethod.hasAnnotation("org.junit.Test")).thenReturn(true);
+
+        // Second file
+        when(secondFile.getFileType()).thenReturn(secondFileType);
+        when(secondFileType.getName()).thenReturn("JAVA");
+        when(psiManager.findFile(secondFile)).thenReturn(secondPsiFile);
+        when(secondPsiFile.getClasses()).thenReturn(new PsiClass[]{secondPsiClass});
+        when(secondPsiClass.getAllMethods()).thenReturn(new PsiMethod[]{secondPsiMethod});
+        when(secondPsiClass.getName()).thenReturn("SecondTest");
+        when(secondPsiMethod.hasAnnotation("org.junit.Test")).thenReturn(true);
+
+        // Shared infrastructure
+        when(jUnitConfigurationType.getConfigurationFactories()).thenReturn(new ConfigurationFactory[]{configurationFactory});
+        when(runManager.createConfiguration("FirstTest", configurationFactory)).thenReturn(configurationSettings);
+        when(configurationSettings.getConfiguration()).thenReturn(jUnitConfiguration);
+        when(configurationSettings.getUniqueID()).thenReturn("uniqueId1");
+        when(jUnitConfiguration.getModules()).thenReturn(new Module[]{module});
+        when(runManager.createConfiguration("SecondTest", configurationFactory)).thenReturn(secondConfigSettings);
+        when(secondConfigSettings.getConfiguration()).thenReturn(secondJUnitConfiguration);
+        when(secondConfigSettings.getUniqueID()).thenReturn("uniqueId2");
+        when(secondJUnitConfiguration.getModules()).thenReturn(new Module[]{module});
+        when(project.getMessageBus()).thenReturn(messageBus);
+        when(messageBus.connect()).thenReturn(messageBusConnection);
+
+        // Act: start running (first job launches, second stays pending)
+        runnerService.runRecentlyChangedTests(project);
+
+        // Both jobs registered, first is active, second is still pending
+        assertTrue(runnerService.isRunningTests());
+
+        // Stop — drains pending queue and signals stop; the active first job stays "running"
+        // until its processTerminated fires (which doesn't happen in unit tests).
+        runnerService.stopTests();
+
+        // The pending (second) job must have been immediately marked CANCELLED in the UI
+        verify(testResultsWindow, times(1)).updateTest(
+                RunnerServiceImpl.getUUID("uniqueId2"), ResultsWindowFactory.TestStatus.CANCELLED);
+
+        // The pending queue is now empty — no more tests will be launched after stop
+        // (isStopping flag is set, launchNextPending will bail out)
+        assertTrue(runnerService.isStopping());
+    }
+
+    @Test
+    public void stopTests_beforeAnyTestLaunched_resetsState() {
+        // Arrange: no changed files → nothing to run
+        runnerService.registerResultsWindow(testResultsWindow);
+        when(changeListManager.getAffectedFiles()).thenReturn(List.of());
+
+        // Not running yet
+        assertFalse(runnerService.isRunningTests());
+
+        // Calling stopTests() when nothing is running should be a no-op (no crash)
+        runnerService.stopTests();
+
+        assertFalse(runnerService.isRunningTests());
+    }
+
+    @Test
+    public void stopTests_preventsNewTestsFromStarting() {
+        // Arrange: one test found and launched (but not yet terminated in tests)
+        setupJUnitInfrastructure();
+        when(psiMethod.hasAnnotation("org.junit.Test")).thenReturn(true);
+
+        runnerService.runRecentlyChangedTests(project);
+        assertTrue(runnerService.isRunningTests());
+
+        // Stop — sets isStopping=true; the single active job stays "running" in the map
+        // until processTerminated fires (doesn't happen in unit tests), but no new jobs
+        // can be launched because launchNextPending() checks isStopping first.
+        runnerService.stopTests();
+
+        // isStopping flag is set, so launchNextPending will refuse to start anything new
+        assertTrue(runnerService.isStopping());
     }
 
     // -------------------------------------------------------------------------

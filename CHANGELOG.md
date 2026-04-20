@@ -7,6 +7,7 @@
 ## [0.0.3] - 2026-04-17
 - Automatic detection of affected test files.
 - Added support for Kotlin tests.
+- Test execution cancellation.
 - Removed compatibility limit.
 
 ## [0.0.2] - 2024-11-28
